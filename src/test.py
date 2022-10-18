@@ -10,6 +10,8 @@ from src.core.camera import Camera
 from src.core.data import TextureData
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
     TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH
+from src.core.renderer import Renderer, ProjectMode
+from src.core.shot import CtxShot
 from src.core.utils import img_from_fbo, gltf_extract, get_vert_center_translation, crop_to_content, split_components
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (512, 512)
@@ -68,11 +70,11 @@ def draw_rand_tris(n: int) -> None:
 def gltf_lib_test() -> None:
     file = f'{INPUT_DIR}mesh.glb'
 
-    mesh, tex_data = gltf_extract(file)
+    mesh_data, tex_data = gltf_extract(file)
 
-    vertices = mesh.vertices
-    indices = mesh.indices
-    uvs = mesh.uvs
+    vertices = mesh_data.vertices
+    indices = mesh_data.indices
+    uvs = mesh_data.uvs
 
     x_tsl, y_tsl, _ = get_vert_center_translation(vertices)
 
@@ -120,85 +122,6 @@ def gltf_lib_test() -> None:
 
     render_result = img_from_fbo(fbo)
     file_path = f'{OUTPUT_DIR}render_mesh.png'
-    cv2.imwrite(file_path, render_result)
-
-    print()
-
-    tex.release()
-    vao.release()
-    vbo.release()
-    fbo.release()
-    prog.release()
-    ctx.release()
-
-
-def test_cube():
-    vertices = np.array([
-        [-0.75, -0.75, -0.75], [0.75, -0.75, -0.75],
-        [0.75, -0.75, 0.75], [-0.75, -0.75, 0.75],
-        [-0.75, 0.75, -0.75], [0.75, 0.75, -0.75],
-        [0.75, 0.75, 0.75], [-0.75, 0.75, 0.75],
-    ], dtype='f4')
-
-    indices = np.array([
-        [0, 1, 2], [2, 3, 0],  # bottom
-        [4, 5, 6], [6, 7, 4],  # top
-        [3, 0, 4], [4, 7, 3],  # left
-        [0, 1, 4], [4, 5, 1],  # back
-        [1, 2, 6], [6, 5, 1],  # right
-        [2, 3, 7], [7, 6, 2],  # front
-    ], dtype='u4')
-
-    uvs = np.array([
-        [0.0, 0.0], [1.0, 0.0],
-        [1.0, 1.0], [0.0, 1.0],
-
-        [0.0, 1.0], [1.0, 1.0],
-        [1.0, 0.0], [0.0, 0.0],
-    ], dtype='f4')
-
-    projection = Matrix44.perspective_projection(45.0, _OUTPUT_RESOLUTION[0] / _OUTPUT_RESOLUTION[1], 0.1, 100.0,
-                                                 dtype='f4')
-
-    view = Matrix44.look_at([0, 2, 4], [0, 0, 0], [0, 1, 0], dtype='f4')
-
-    model = Matrix44.from_translation([0, 0, 0], dtype='f4') * Quaternion.from_y_rotation(-pi / 4, dtype='f4')
-
-    ctx = mgl.create_context(standalone=True)
-    ctx.enable(mgl.DEPTH_TEST)
-
-    with open(TEX_VERT_SHADER_PATH) as file:
-        vert_shader = file.read()
-    with open(TEX_FRAG_SHADER_PATH) as file:
-        frag_shader = file.read()
-    prog = ctx.program(vertex_shader=vert_shader, fragment_shader=frag_shader)
-
-    prog['projection'].write(projection)
-    prog['view'].write(view)
-    prog['model'].write(model)
-
-    fbo = ctx.simple_framebuffer(_OUTPUT_RESOLUTION, components=4)
-    fbo.use()
-
-    texture = TextureData(cv2.imread(f'{INPUT_DIR}crate.jpg'))
-    tex = ctx.texture(*texture.tex_gen_input(), dtype='f4')
-    tex.use()
-
-    vbo = ctx.buffer(reserve=5 * 4 * vertices.shape[0])
-    ibo = ctx.buffer(indices.tobytes())
-    vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'pos_in', 'uv_cord_in')], index_buffer=ibo, index_element_size=4)
-
-    x, y, z = vertices[..., 0], vertices[..., 1], vertices[..., 2]
-    u, v = uvs[..., 0], uvs[..., 1]
-
-    shader_data = np.dstack([x, y, z, u, v])
-    vbo.write(shader_data.astype('f4').tobytes())
-
-    fbo.clear(*_CLEAR_COLOR)
-    vao.render(mgl.TRIANGLES)
-
-    render_result = img_from_fbo(fbo)
-    file_path = f'{OUTPUT_DIR}render_cube.png'
     cv2.imwrite(file_path, render_result)
 
     print()
@@ -276,8 +199,30 @@ def test_crop_to_content():
     cv2.imwrite(f'{OUTPUT_DIR}crop.png', img)
 
 
+def test_projection():
+    ctx = mgl.create_context(standalone=True)
+    ctx.enable(mgl.DEPTH_TEST)
+
+    gltf_file = f'{INPUT_DIR}mesh.glb'
+    mesh_data, texture_data = gltf_extract(gltf_file)
+
+    json_file = 'C:\\Users\\Cleo\\Documents\\Git\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
+    shots = CtxShot.from_json(json_file, ctx)
+
+    camera = Camera(position=Vector3([0, 1, 0]), forward=Vector3([0, 0, -1]), up=Vector3([0, 1, 0]))
+
+    renderer = Renderer((512, 512), ctx, camera, mesh_data, texture_data)
+
+    projections = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW)
+
+    for projection in projections:
+        cv2.imshow('proj', projection)
+        cv2.waitKey()
+        cv2.destroyAllWindows()
+
+
 def main() -> None:
-    gltf_lib_test()
+    test_projection()
 
 
 if __name__ == '__main__':

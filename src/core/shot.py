@@ -1,4 +1,7 @@
-from typing import Union, Final
+import json
+import os.path
+import pathlib
+from typing import Union, Final, Optional
 
 import cv2
 import numpy as np
@@ -8,6 +11,8 @@ from pyrr import Vector3, Quaternion, Matrix44
 
 from src.core.camera import Camera
 from src.core.data import TextureData
+from src.core.defs import PATH_SEP
+from src.core.utils import get_first_valid
 
 
 class Shot:
@@ -29,7 +34,7 @@ class Shot:
         """
         self._released = False
         self.camera = Camera(fovy, aspect_ratio, position=position, rotation=rotation)
-        if isinstance(img, NDArray):
+        if isinstance(img, np.ndarray):
             self._tex_data = TextureData(img.copy())
         else:
             self._tex_data = TextureData(self._load_image(str(img)))
@@ -87,4 +92,36 @@ class CtxShot(Shot):
 
     def use(self) -> None:
         self.tex.use()
+
+    @staticmethod
+    def from_json(file: str, ctx: Context, image_dir: Optional[str] = None, fovy: float = 60.0) -> list['CtxShot']:
+        shots = []
+
+        if image_dir is None:
+            image_dir = str(pathlib.Path(file).parent.absolute())
+
+        with open(file, 'r') as f:
+            data = json.load(f)
+
+        for image in data.get('images', []):
+            img_file = get_first_valid(image, ['imagefile', 'file', 'image'])
+            position = get_first_valid(image, ['location', 'pos', 'loc'])
+            rotation = get_first_valid(image, ['rotation', 'rot', 'quaternion'])
+            fov = get_first_valid(image, ['fovy', 'fov', 'fieldofview'])
+
+            if img_file is None or position is None or rotation is None:
+                raise ValueError('The given JSON file does not contain valid data')
+
+            rot_len = len(rotation)
+            for _ in range(4 - rot_len):
+                rotation.append(0.0)
+
+            if fov is None:
+                fov = fovy
+
+            img_file = f'{image_dir}{PATH_SEP}{img_file}'
+
+            # TODO: Check when position is NoneType
+            shots.append(CtxShot(ctx, img_file, Vector3(position), Quaternion(rotation), fov))
+        return shots
 

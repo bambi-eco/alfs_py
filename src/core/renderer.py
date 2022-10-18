@@ -3,7 +3,9 @@ from typing import Final, Optional, Iterable, Union
 
 from moderngl import Context, Program, Framebuffer
 from numpy.typing import NDArray
+from pyrr import Matrix44
 
+from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject
 from src.core.defs import TRANSPARENT
 from src.core.shot import CtxShot
@@ -22,8 +24,9 @@ class Renderer:
     _prog: Final[Program]
     _fbo: Final[Framebuffer]
     _obj: RenderObject
+    camera: Camera
 
-    def __init__(self, resolution: tuple[int, int], ctx: Context, mesh: MeshData,
+    def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
                  texture: Optional[TextureData] = None):
         self._released = False
         self._resolution = resolution
@@ -31,6 +34,17 @@ class Renderer:
         self._prog = ctx.program(vertex_shader=self._VERT_SHADER, fragment_shader=self._FRAG_SHADER)
         self._fbo = self._ctx.simple_framebuffer(resolution, components=4)
         self._obj = mesh_to_render_obj(self._prog, mesh, texture)
+
+        self.camera = camera
+        self.apply_camera()
+
+    def apply_camera(self) -> None:
+        """
+        Applies the current camera values to the shader
+        """
+        self._prog["m_model"].write(Matrix44.identity(dtype='f4'))
+        self._prog["m_cam"].write(self.camera.get_view())
+        self._prog["m_proj"].write(self.camera.get_proj())
 
     def release(self) -> None:
         """

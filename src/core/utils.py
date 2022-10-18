@@ -1,5 +1,5 @@
 import base64
-from typing import Union, Optional, Iterable, Sequence
+from typing import Union, Optional, Iterable, Sequence, Any
 from urllib.request import urlopen
 
 import cv2
@@ -13,6 +13,20 @@ from pyrr import Vector3
 from src.core.data import MeshData, TextureData
 from src.core.data import RenderObject
 from src.core.defs import EPSILON
+
+
+def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[Any] = None) -> Any:
+    """
+    Returns the value within a dict associated with the first valid key of a iterable key source
+    :param in_dict: The dictionary to search within
+    :param keys: An iterable source of keys
+    :param default: The value to be returned when no valid key was passed (optional)
+    :return: The value of default if no valid key was passed; otherwise the value associated with the first valid key
+    """
+    for key in keys:
+        if key in in_dict:
+            return in_dict.get(key)
+    return default
 
 
 def img_from_fbo(fbo: Framebuffer) -> NDArray[np.uint8]:
