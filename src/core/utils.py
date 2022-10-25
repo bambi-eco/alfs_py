@@ -41,42 +41,6 @@ def img_from_fbo(fbo: Framebuffer) -> NDArray[np.uint8]:
     return cv2.flip(img, 0)  # modern gl seems to vertically flip output
 
 
-def mesh_to_render_obj(prog: Program, mesh: MeshData, texture: Optional[TextureData] = None) -> RenderObject:
-    """
-    Takes mesh data and converts into a ``RenderObject`` using the provided shader and its context,
-    loading all data into the buffers automatically
-    :param prog: The shader program to attach all buffers to
-    :param mesh: The mesh data of the object to convert
-    :param texture: The texture data of the object to convert (optional)
-    :return: A ``RenderObject`` representing the given mesh data
-    """
-    ctx = prog.ctx
-    if MeshData.uvs is not None:
-        x, y, z = mesh.vertices[..., 0], mesh.vertices[..., 1], mesh.vertices[..., 2]
-        u, v = mesh.uvs[..., 0], mesh.uvs[..., 1]
-        shader_data = np.dstack([x, y, z, u, v])
-        vbo = ctx.buffer(shader_data.tobytes())
-        vao_content = [(vbo, '3f4 2f4', 'pos_in', 'uv_cord_in')]
-    else:
-        vbo = ctx.buffer(mesh.vertices.tobytes())
-        vao_content = [(vbo, '3f4', 'pos_in')]
-
-    if MeshData.indices is not None:
-        ibo = ctx.buffer(mesh.indices.tobytes())
-        vao = ctx.vertex_array(prog, vao_content, index_buffer=ibo, index_element_size=4)
-    else:
-        ibo = None
-        vao = ctx.vertex_array(prog, vao_content)
-
-    if texture is not None:
-        tex = ctx.texture(*texture.tex_gen_input(), dtype='f4')
-    else:
-        tex = None
-
-    obj = RenderObject(vao, vbo, ibo, tex)
-    return obj
-
-
 def base64_to_img(base64_data: Union[bytes, str]) -> NDArray[np.number]:
     """
     Turns a base64 representation of an image into an OpenCV representation
@@ -138,7 +102,16 @@ def overlay(img_a: NDArray, img_b: NDArray) -> Optional[NDArray]:
         return img_b.copy()
 
     result = img_a.copy()
-    result[img_b[..., 3] <= EPSILON] = img_b
+    over = img_b.copy()
+
+    alpha = img_b[..., 3]
+    fact = (255.0 - alpha) / 255.0
+
+    for i in range(0, result.shape[-1]):
+        result[..., i] = (result[..., i] * fact).astype(img_a.dtype)
+        over[..., i] = (over[..., i] * alpha).astype(img_b.dtype)
+    # img_b[..., 0:3] *= img_b[..., 3]
+    result += over
     return result
 
 

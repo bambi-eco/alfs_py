@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Final, Optional, Iterable, Union
 
+import cv2
 from moderngl import Context, Program, Framebuffer
 from numpy.typing import NDArray
 from pyrr import Matrix44
@@ -9,7 +10,7 @@ from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject
 from src.core.defs import TRANSPARENT
 from src.core.shot import CtxShot
-from src.core.utils import img_from_fbo, mesh_to_render_obj, overlay, crop_to_content
+from src.core.utils import img_from_fbo, overlay, crop_to_content
 
 
 class ProjectMode(Enum):
@@ -21,9 +22,10 @@ class Renderer:
     _released: bool
     _resolution: Final[tuple[int, int]]
     _ctx: Final[Context]
-    _prog: Final[Program]
     _fbo: Final[Framebuffer]
+    _obj_prog: Final[Program]
     _obj: RenderObject
+    _shot_prog: Final[Program]
     camera: Camera
 
     def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
@@ -31,9 +33,14 @@ class Renderer:
         self._released = False
         self._resolution = resolution
         self._ctx = ctx
-        self._prog = ctx.program(vertex_shader=self._VERT_SHADER, fragment_shader=self._FRAG_SHADER)
         self._fbo = self._ctx.simple_framebuffer(resolution, components=4)
-        self._obj = mesh_to_render_obj(self._prog, mesh, texture)
+        self._fbo.use()
+
+        self._obj_prog = ctx.program(vertex_shader=self._OBJ_VERT_SHADER, fragment_shader=self._OBJ_FRAG_SHADER)
+        self._obj = RenderObject.from_mesh(self._obj_prog, mesh, texture, self._PAR_POS, self._PAR_UV)
+
+        self._shot_prog = ctx.program(vertex_shader=self._SHOT_VERT_SHADER, fragment_shader=self._SHOT_FRAG_SHADER)
+        self._shot = self._obj.copy_for_prog(self._shot_prog, 1)
 
         self.camera = camera
         self.apply_camera()
@@ -42,9 +49,10 @@ class Renderer:
         """
         Applies the current camera values to the shader
         """
-        self._prog["m_model"].write(Matrix44.identity(dtype='f4'))
-        self._prog["m_cam"].write(self.camera.get_view())
-        self._prog["m_proj"].write(self.camera.get_proj())
+        for prog in (self._obj_prog, self._shot_prog):
+            prog[self._PAR_MODEL].write(Matrix44.identity(dtype='f4'))
+            prog[self._PAR_VIEW].write(self.camera.get_view())
+            prog[self._PAR_PROJ].write(self.camera.get_proj())
 
     def release(self) -> None:
         """
@@ -53,7 +61,8 @@ class Renderer:
         if not self._released:
             self._obj.release()
             self._fbo.release()
-            self._prog.release()
+            self._obj_prog.release()
+            self._shot_prog.release()
             self._released = True
 
     def render_ground(self) -> NDArray:
@@ -62,8 +71,14 @@ class Renderer:
         :return: The finished render result
         """
         self._fbo.clear(*TRANSPARENT)
+        self._obj.tex_use()
         self._obj.render()
         return img_from_fbo(self._fbo)
+
+    def _use_shot(self, shot: CtxShot):
+        shot.use()
+        self._shot_prog[self._PAR_SHOT_PROJ].write(shot.get_proj())
+        self._shot_prog[self._PAR_SHOT_VIEW].write(shot.get_view())
 
     def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode) -> list[NDArray]:
         """
@@ -79,11 +94,12 @@ class Renderer:
         for shot in shots:
             self._fbo.clear(*TRANSPARENT)
             self._use_shot(shot)
-            self._obj.render()
+            self._shot.render()
             results.append(img_from_fbo(self._fbo))
 
         if mode is ProjectMode.COMPLETE_VIEW:
             background = self.render_ground()
+            cv2.imshow('wow', background)
             results = [overlay(background, result) for result in results]
 
         elif mode is ProjectMode.SHOT_VIEW:
@@ -91,54 +107,86 @@ class Renderer:
 
         return results
 
-    def _use_shot(self, shot: CtxShot):
-        shot.use()
-        self._prog['m_shot_proj'].write(shot.get_proj())
-        self._prog['m_shot_cam'].write(shot.get_view())
+    _PAR_POS: Final[str] = 'v_in_v3_pos'
+    _PAR_UV: Final[str] = 'v_in_v2_uv'
+    _PAR_PROJ: Final[str] = 'u_m4_proj'
+    _PAR_VIEW: Final[str] = 'u_m4_view'
+    _PAR_MODEL: Final[str] = 'u_m4_model'
+    _PAR_TEX: Final[str] = 'u_s2_tex'
+    _PAR_SHOT_PROJ: Final[str] = 'u_m4_shot_proj'
+    _PAR_SHOT_VIEW: Final[str] = 'u_m4_shot_cam'
 
-    _VERT_SHADER: Final[str] = """
-        #version 330
-
-        // model view projection matrices of the focus surface (virtual camera)
-        uniform mat4 m_proj;
-        uniform mat4 m_model;
-        uniform mat4 m_cam;
-
-        // view and camera/projection matrix for one shot:
-        uniform mat4 m_shot_cam;
-        uniform mat4 m_shot_proj;
-
-        in vec3 in_position;
-        out vec4 wpos;
-        out vec4 shotUV;
-
-        void main() {
-            wpos = m_model * vec4(in_position, 1.0);
-            gl_Position = m_proj * m_cam * wpos;
-
-            shotUV = m_shot_proj * m_shot_cam * wpos;
-        }
+    _OBJ_VERT_SHADER: Final[str] = f"""
+    #version 330
+    uniform mat4 {_PAR_PROJ};
+    uniform mat4 {_PAR_VIEW};
+    uniform mat4 {_PAR_MODEL};
+    
+    layout (location = 0) in vec3 {_PAR_POS};
+    layout (location = 1) in vec2 {_PAR_UV};
+    out vec2 v_out_v2_uv;
+    
+    void main() {{
+        v_out_v2_uv = {_PAR_UV}.xy;
+        gl_Position = {_PAR_PROJ} * {_PAR_VIEW} * {_PAR_MODEL} * vec4({_PAR_POS}.xyz, 1.0);
+    }}
     """
 
-    _FRAG_SHADER: Final[str] = """
-        #version 330
+    _OBJ_FRAG_SHADER: Final[str] = f"""
+    #version 330
 
-        uniform sampler2D shotTexture;
+    uniform sampler2D {_PAR_TEX};
+    
+    in vec2 v_out_v2_uv;
+    out vec4 f_out_v4_color;
+    
+    void main() {{
+        f_out_v4_color = texture(u_s2_tex, v_out_v2_uv);
+    }}
+    """
 
-        in vec4 wpos;
-        in vec4 shotUV;
-        out vec4 color;
+    _SHOT_VERT_SHADER: Final[str] = f"""
+    #version 330
 
-        void main() {
-            vec4 uv = shotUV;
-            uv = vec4(uv.xyz / uv.w / 2.0 + .5, 1.0); // perspective division and conversion to [0,1] from NDC
+    // model view projection matrices of the focus surface (virtual camera)
+    uniform mat4 {_PAR_PROJ};
+    uniform mat4 {_PAR_VIEW};
+    uniform mat4 {_PAR_MODEL};
 
-            if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-                discard; // throw away the fragment 
-                color = vec4(0.0, 0.0, 0.0, 0.0);
-            } else {
-                // DEBUG: color = vec4(1.0, 1.0, 0.0, 1.0);
-                color = vec4(texture(shotTexture, uv.xy).rgb, 1.0);
-            }
-        }
+    // view and camera/projection matrix for one shot:
+    uniform mat4 {_PAR_SHOT_PROJ};
+    uniform mat4 {_PAR_SHOT_VIEW};
+
+    layout (location = 0) in vec3 {_PAR_POS};
+    out vec4 v_out_v4_shot_uv;
+
+    void main() {{
+        vec4 world_pos = {_PAR_MODEL} * vec4({_PAR_POS}.xyz, 1.0);
+        gl_Position = {_PAR_PROJ} * {_PAR_VIEW} *  world_pos;
+        v_out_v4_shot_uv = {_PAR_SHOT_PROJ} * {_PAR_SHOT_VIEW} * world_pos;
+    }}
+    """
+
+    _SHOT_FRAG_SHADER: Final[str] = f"""
+    #version 330
+
+    uniform sampler2D {_PAR_TEX};
+
+    in vec4 v_out_v4_shot_uv;
+    out vec4 f_out_v4_color;
+
+    void main() {{
+        vec4 uv = v_out_v4_shot_uv;
+        uv = vec4(uv.xyz / uv.w / 2.0 + .5, 1.0); // perspective division and conversion to [0,1] from NDC
+        
+        f_out_v4_color = vec4(abs(uv.xy),0.0,1.0);
+        return;
+        
+        if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {{ // uv out of bounds
+            discard; // throw away the fragment 
+            f_out_v4_color = vec4(0.0, 0.0, 0.0, 0.0);
+        }} else {{
+            f_out_v4_color = vec4(texture({_PAR_TEX}, uv.xy).rgb, 1.0);
+        }}
+    }}
     """

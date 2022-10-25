@@ -3,16 +3,15 @@ from typing import Final
 import cv2
 import moderngl as mgl
 import numpy as np
-from numpy import pi
-from pyrr import Matrix44, Quaternion, Vector3
+from pyrr import Matrix44, Vector3
 
 from src.core.camera import Camera
-from src.core.data import TextureData
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
     TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
-from src.core.utils import img_from_fbo, gltf_extract, get_vert_center_translation, crop_to_content, split_components
+from src.core.utils import img_from_fbo, gltf_extract, get_vert_center_translation, crop_to_content, split_components, \
+    overlay
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (512, 512)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)  # TRANSPARENT
@@ -206,12 +205,11 @@ def test_projection():
     gltf_file = f'{INPUT_DIR}mesh.glb'
     mesh_data, texture_data = gltf_extract(gltf_file)
 
+    camera = Camera(orthogonal=False, orthogonal_size=(1024, 1024), position=Vector3([0, 250, 1750]))
+    renderer = Renderer((1024, 1024), ctx, camera, mesh_data, texture_data)
+
     json_file = 'C:\\Users\\Cleo\\Documents\\Git\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
     shots = CtxShot.from_json(json_file, ctx)
-
-    camera = Camera(position=Vector3([0, 1, 0]), forward=Vector3([0, 0, -1]), up=Vector3([0, 1, 0]))
-
-    renderer = Renderer((512, 512), ctx, camera, mesh_data, texture_data)
 
     projections = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW)
 

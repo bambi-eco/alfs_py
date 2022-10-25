@@ -103,7 +103,7 @@ class CtxShot(Shot):
         with open(file, 'r') as f:
             data = json.load(f)
 
-        for image in data.get('images', []):
+        for image in data.get('images', [])[0:5]:
             img_file = get_first_valid(image, ['imagefile', 'file', 'image'])
             position = get_first_valid(image, ['location', 'pos', 'loc'])
             rotation = get_first_valid(image, ['rotation', 'rot', 'quaternion'])
@@ -112,16 +112,22 @@ class CtxShot(Shot):
             if img_file is None or position is None or rotation is None:
                 raise ValueError('The given JSON file does not contain valid data')
 
-            rot_len = len(rotation)
-            for _ in range(4 - rot_len):
-                rotation.append(0.0)
+            pos = Vector3(position)
+            if pos is None:
+                # TODO: Check when position is NoneType
+                print()
+
+            # rot_len = len(rotation)
+            # for _ in range(4 - rot_len):
+            #     rotation.append(0.0)
+
+            rotation = [0, 0, 0, 1]
 
             if fov is None:
                 fov = fovy
 
             img_file = f'{image_dir}{PATH_SEP}{img_file}'
 
-            # TODO: Check when position is NoneType
             shots.append(CtxShot(ctx, img_file, Vector3(position), Quaternion(rotation), fov))
         return shots
 

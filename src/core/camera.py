@@ -62,8 +62,8 @@ class Camera:
             if up.dot(forward) > 0.000125:
                 raise ValueError('The up and forward vector have to be orthogonal')
 
-            target = position + forward.normalize()
-            rotation = Quaternion.from_matrix(Matrix44.look_at(position, target, up.normalize()))
+            target = position + forward.normalized
+            rotation = Quaternion.from_matrix(Matrix44.look_at(position, target, up.normalized))
         else:
             rotation = rotation if rot_set else Quaternion([0.0, 0.0, 0.0, 1.0])
 
