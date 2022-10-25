@@ -40,10 +40,21 @@ class Renderer:
         self._obj = RenderObject.from_mesh(self._obj_prog, mesh, texture, self._PAR_POS, self._PAR_UV)
 
         self._shot_prog = ctx.program(vertex_shader=self._SHOT_VERT_SHADER, fragment_shader=self._SHOT_FRAG_SHADER)
-        self._shot = self._obj.copy_for_prog(self._shot_prog, 1)
+        self._shot = self._get_shot_render_object()
 
         self.camera = camera
         self.apply_camera()
+
+    def _get_shot_render_object(self) -> RenderObject:
+        vertex_buf = self._obj.vertex_buf
+        vao_content = [(vertex_buf, '3f4', self._PAR_POS)]
+        ibo = self._obj.ibo
+        if ibo is not None:
+            vao = self._ctx.vertex_array(self._shot_prog, vao_content, index_buffer=ibo, index_element_size=4)
+        else:
+            vao = self._ctx.vertex_array(self._shot_prog, vao_content)
+
+        return RenderObject(vao, vao_content, vertex_buf, None, ibo, self._obj.tex)
 
     def apply_camera(self) -> None:
         """
@@ -178,9 +189,6 @@ class Renderer:
     void main() {{
         vec4 uv = v_out_v4_shot_uv;
         uv = vec4(uv.xyz / uv.w / 2.0 + .5, 1.0); // perspective division and conversion to [0,1] from NDC
-        
-        f_out_v4_color = vec4(abs(uv.xy),0.0,1.0);
-        return;
         
         if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {{ // uv out of bounds
             discard; // throw away the fragment 

@@ -112,16 +112,9 @@ class CtxShot(Shot):
             if img_file is None or position is None or rotation is None:
                 raise ValueError('The given JSON file does not contain valid data')
 
-            pos = Vector3(position)
-            if pos is None:
-                # TODO: Check when position is NoneType
-                print()
-
-            # rot_len = len(rotation)
-            # for _ in range(4 - rot_len):
-            #     rotation.append(0.0)
-
-            rotation = [0, 0, 0, 1]
+            rot_len = len(rotation)
+            for _ in range(4 - rot_len):
+                rotation.append(0.0)
 
             if fov is None:
                 fov = fovy

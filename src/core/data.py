@@ -1,10 +1,10 @@
 from typing import Optional
 
 import cv2
-import numpy as np
 from attr import define, dataclass
 from moderngl import VertexArray, Buffer, Texture, Program
 from numpy.typing import NDArray
+from pyrr import Vector3
 
 
 @define
@@ -56,13 +56,15 @@ class RenderObject:
     Class that represents an object that has already been loaded into VRAM
     :cvar vao: The associated vertex array
     :cvar vao_content: A tuple describing the content of the VAO
-    :cvar vbo: The associated buffer holding vertex data (position, color, uv, etc.)
+    :cvar vertex_buf: The associated buffer holding vertex positions
+    :cvar uv_buf: The associated buffer holding vertex uv coordinates
     :cvar ibo: The associated buffer holding index data (nullable)
     :cvar tex: The associated texture buffer (nullable)
     """
     vao: VertexArray
     vao_content: list[tuple[Buffer, str, ...]]
-    vbo: Buffer
+    vertex_buf: Buffer
+    uv_buf: Optional[Buffer] = None
     ibo: Optional[Buffer] = None
     tex: Optional[Texture] = None
 
@@ -93,32 +95,8 @@ class RenderObject:
             self.ibo.release()
             self.ibo = None
 
-            self.vbo.release()
+            self.vertex_buf.release()
             self.vao.release()
-
-    def _vao_content_for_prog(self, prog: Program, in_count) -> list[tuple[Buffer, str, ...]]:
-        tup = self.vao_content[0]
-        buf = tup[0]
-        types = ' '.join(tup[1].split(' ')[0:in_count])
-        in_vars = tup[2:2 + in_count]
-        return [(buf, types, *in_vars)]
-
-    def copy_for_prog(self, prog: Program, in_count: int) -> 'RenderObject':
-        """
-        Creates a shallow copy of this object, changing its shader to the given shader.
-        Otherwise, all buffers and data are reused. Type order of previous program will also be reused
-        :param prog: The shader program to be applied to the shallow copy
-        :param in_count: The amount of input variables in the vertex shader
-        :return: A shallow copy of this object with the given shader applied
-        """
-        vao_content_copy = self._vao_content_for_prog(prog, in_count)
-
-        if self.ibo is not None:
-            vao = prog.ctx.vertex_array(prog, vao_content_copy, index_buffer=self.ibo, index_element_size=4)
-        else:
-            vao = prog.ctx.vertex_array(prog, vao_content_copy)
-
-        return RenderObject(vao, vao_content_copy, self.vbo, self.ibo, self.tex)
 
     @staticmethod
     def from_mesh(prog: Program, mesh: MeshData, texture: Optional[TextureData] = None,
@@ -135,15 +113,15 @@ class RenderObject:
         """
         ctx = prog.ctx
         vao_content = []
+
+        vertex_buf = ctx.buffer(mesh.vertices.tobytes())
+        vao_content.append((vertex_buf, '3f4', vert_par))
+
         if MeshData.uvs is not None:
-            x, y, z = mesh.vertices[..., 0], mesh.vertices[..., 1], mesh.vertices[..., 2]
-            u, v = mesh.uvs[..., 0], mesh.uvs[..., 1]
-            shader_data = np.dstack([x, y, z, u, v])
-            vbo = ctx.buffer(shader_data.tobytes())
-            vao_content.append((vbo, '3f4 2f4', vert_par, uv_par))
+            uv_buf = ctx.buffer(mesh.uvs.tobytes())
+            vao_content.append((uv_buf, '2f4', uv_par))
         else:
-            vbo = ctx.buffer(mesh.vertices.tobytes())
-            vao_content.append((vbo, '3f4', vert_par))
+            uv_buf = None
 
         if MeshData.indices is not None:
             ibo = ctx.buffer(mesh.indices.tobytes())
@@ -157,5 +135,37 @@ class RenderObject:
         else:
             tex = None
 
-        obj = RenderObject(vao, vao_content, vbo, ibo, tex)
+        obj = RenderObject(vao, vao_content, vertex_buf, uv_buf, ibo, tex)
         return obj
+
+
+@dataclass
+class AABB:
+    """
+    Represents a 3D axis aligned bounding box
+    :cvar p_s: The start corner of the bounding box
+    :cvar p_e: The end corner of the bounding box
+    """
+    p_s: Vector3
+    p_e: Vector3
+
+    @property
+    def width(self) -> float:
+        """
+        :return: The width / length in X direction of the AABB
+        """
+        return abs(self.p_e.x - self.p_s.x)
+
+    @property
+    def height(self) -> float:
+        """
+        :return: The height / length in Y direction of the AABB
+        """
+        return abs(self.p_e.y - self.p_s.y)
+
+    @property
+    def depth(self) -> float:
+        """
+        :return: The depth / length in Z direction of the AABB
+        """
+        return abs(self.p_e.z - self.p_s.z)

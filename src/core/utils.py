@@ -5,14 +5,12 @@ from urllib.request import urlopen
 import cv2
 import numpy as np
 from gltflib import GLTF
-from moderngl import Framebuffer, Program
+from moderngl import Framebuffer
 from numpy import ndarray
 from numpy.typing import NDArray
 from pyrr import Vector3
 
-from src.core.data import MeshData, TextureData
-from src.core.data import RenderObject
-from src.core.defs import EPSILON
+from src.core.data import MeshData, TextureData, AABB
 
 
 def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[Any] = None) -> Any:
@@ -302,18 +300,22 @@ def gltf_extract(file: str) -> tuple[MeshData, TextureData]:
     return gltf_to_mesh_data(gltf_file), gltf_to_texture_data(gltf_file)
 
 
-def get_vert_center_translation(vertices: NDArray) -> tuple[float, float, float]:
+def get_center(vertices: NDArray) -> tuple[Vector3, AABB]:
     """
-    Computes the offset from the meshes center to the origin
-    :param vertices: A numpy array representing mesh vertices
-    :return: A tuple describing the offset that has to be added to all vertices to center the mesh to the origin
+    Computes the center position and AABB of a set of vertices
+    :param vertices: A numpy array containing vertices
+    :return: A tuple containing the center of the vertices and the two points defining the vertices AABB
     """
     max_x, max_y, max_z = np.max(vertices, axis=0)
     min_x, min_y, min_z = np.min(vertices, axis=0)
     dhx = abs(max_x - min_x) / 2.0
     dhy = abs(max_y - min_y) / 2.0
     dhz = abs(max_z - min_z) / 2.0
-    return dhx - max_x, dhy - max_y, dhz - max_z
+
+    center = Vector3((min_x + dhx, min_y + dhy, min_z + dhz))
+    max_p = Vector3((max_x, max_y, max_z))
+    min_p = Vector3((min_x, min_y, min_z))
+    return center, AABB(min_p, max_p)
 
 
 def make_plane(size: float = 1.0, y: float = 0.0) -> MeshData:

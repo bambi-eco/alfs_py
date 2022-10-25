@@ -7,11 +7,11 @@ from pyrr import Matrix44, Vector3
 
 from src.core.camera import Camera
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
-    TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH
+    TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, ROOT_DIR
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
-from src.core.utils import img_from_fbo, gltf_extract, get_vert_center_translation, crop_to_content, split_components, \
-    overlay
+from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
+    get_center
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (512, 512)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)  # TRANSPARENT
@@ -75,7 +75,8 @@ def gltf_lib_test() -> None:
     indices = mesh_data.indices
     uvs = mesh_data.uvs
 
-    x_tsl, y_tsl, _ = get_vert_center_translation(vertices)
+    center, _ = get_center(vertices)
+    x_tsl, y_tsl = center
 
     camera = Camera(orthogonal=False, orthogonal_size=(1024, 1024), position=Vector3([0, 0, 750]))
     camera.look_at(Vector3([0, 0, 0]))
@@ -108,7 +109,7 @@ def gltf_lib_test() -> None:
     vbo = ctx.buffer(reserve=5 * 4 * vertices.shape[0])
     ibo = ctx.buffer(indices.tobytes())
     vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'pos_in', 'uv_cord_in')], index_buffer=ibo, index_element_size=4)
-    # vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'pos_in', 'uv_cord_in')])
+    # vao = ctx.vertex_array(prog, [(vetices, '3f4 2f4', 'pos_in', 'uv_cord_in')])
 
     x, y, z = split_components(vertices)
     u, v = split_components(uvs)
@@ -205,10 +206,14 @@ def test_projection():
     gltf_file = f'{INPUT_DIR}mesh.glb'
     mesh_data, texture_data = gltf_extract(gltf_file)
 
-    camera = Camera(orthogonal=False, orthogonal_size=(1024, 1024), position=Vector3([0, 250, 1750]))
+    center, aabb = get_center(mesh_data.vertices)
+    center.z = 1
+    o_size = (int(aabb.width + 0.5), int(aabb.height + 0.5))
+
+    camera = Camera(orthogonal=True, orthogonal_size=o_size, position=center)
     renderer = Renderer((1024, 1024), ctx, camera, mesh_data, texture_data)
 
-    json_file = 'C:\\Users\\Cleo\\Documents\\Git\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
+    json_file = f'{ROOT_DIR}\\..\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
     shots = CtxShot.from_json(json_file, ctx)
 
     projections = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW)
