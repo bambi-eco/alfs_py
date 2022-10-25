@@ -1,4 +1,4 @@
-from typing import Final, Generator, Sequence, Iterator, Optional, cast
+from typing import Final
 
 import cv2
 import moderngl as mgl
@@ -8,13 +8,14 @@ from pyrr import Matrix44, Vector3
 from src.core.camera import Camera
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
     TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, ROOT_DIR
+from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
-    get_center
+    get_center, int_up, gen_checkerboard_tex
 
-_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (512, 512)
-_CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)  # TRANSPARENT
+_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024, 1024)
+_CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
 
 _FOV: Final[float] = 45.0
 _NEAR_CLIP: Final[float] = 0.1
@@ -200,20 +201,6 @@ def test_crop_to_content():
 
 
 def test_projection():
-
-    def file_name_gen(filetype: str, prefix: Optional[str] = None, suffix: Optional[str] = None) -> Iterator[str]:
-        r_filetype = str(filetype) if filetype.startswith('.') else f'.{filetype}'
-        r_prefix = f'{prefix}_' if prefix is not None else ''
-        r_suffix = f'_{suffix}' if suffix is not None else ''
-
-        def gen() -> str:
-            i = 0
-            while True:
-                yield f'{r_prefix}{i}{r_suffix}{r_filetype}'
-                i += 1
-
-        return gen()
-
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
 
@@ -222,16 +209,22 @@ def test_projection():
 
     center, aabb = get_center(mesh_data.vertices)
     center.z = 1
-    o_size = (int(aabb.width + 0.5), int(aabb.height + 0.5))
+    ortho_size = int_up(aabb.width), int_up(aabb.height)
 
-    camera = Camera(orthogonal=True, orthogonal_size=o_size, position=center)
-    renderer = Renderer((1024, 1024), ctx, camera, mesh_data, texture_data)
+    camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
+    renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
     json_file = f'{ROOT_DIR}\\..\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
-    shots = CtxShot.from_json(json_file, ctx)
+    shots = CtxShot.from_json(json_file, ctx, count=1)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
     renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=True, save_name_iter=file_name_iter)
+
+    for shot in shots:
+        shot.release()
+
+    renderer.release()
+    ctx.release()
 
 
 def main() -> None:

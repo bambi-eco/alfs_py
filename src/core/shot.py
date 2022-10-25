@@ -54,13 +54,22 @@ class Shot:
         return img
 
     def get_proj(self) -> Matrix44:
-        return self.camera.get_proj()
+        """
+        :return: A matrix representing the projection of this shots camera
+        """
+        return self.camera.get_proj(dtype='f4')
 
     def get_view(self) -> Matrix44:
-        return self.camera.get_view()
+        """
+        :return: A matrix representing the view of this shots camera
+        """
+        return self.camera.get_view(dtype='f4')
 
     def get_mat(self) -> Matrix44:
-        return self.camera.get_mat()
+        """
+        :return: A matrix representing the combination of projection and view of this shots camera
+        """
+        return self.camera.get_mat(dtype='f4')
 
 
 class CtxShot(Shot):
@@ -90,11 +99,24 @@ class CtxShot(Shot):
             self.tex.release()
             self._released = True
 
-    def use(self) -> None:
+    def tex_use(self) -> None:
+        """
+        Binds the texture of this object to a texture unit
+        """
         self.tex.use()
 
     @staticmethod
-    def from_json(file: str, ctx: Context, image_dir: Optional[str] = None, fovy: float = 60.0) -> list['CtxShot']:
+    def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
+                  fovy: float = 60.0) -> list['CtxShot']:
+        """
+        Creates context shots from a JSON file
+        :param file: The path of the JSON file to process
+        :param ctx: The context to attach the context shots to
+        :param count: The maximum amount of shots to be created (optional)
+        :param image_dir: The directory of the images referenced in the JSON file (defaults to the JSON files directory)
+        :param fovy: The default fovy value to be used when a JSON entry does not provide one
+        :return: A list of ``CtxShot`` objects
+        """
         shots = []
 
         if image_dir is None:
@@ -103,7 +125,14 @@ class CtxShot(Shot):
         with open(file, 'r') as f:
             data = json.load(f)
 
-        for image in data.get('images', [])[0:5]:
+        if count is not None:
+            images_dat = data.get('images', [])
+            act_count = min(len(images_dat), count)
+            images = images_dat[0:act_count]
+        else:
+            images = data.get('images', [])
+
+        for image in images:
             img_file = get_first_valid(image, ['imagefile', 'file', 'image'])
             position = get_first_valid(image, ['location', 'pos', 'loc'])
             rotation = get_first_valid(image, ['rotation', 'rot', 'quaternion'])

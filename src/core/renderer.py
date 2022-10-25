@@ -8,9 +8,9 @@ from pyrr import Matrix44
 
 from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject
-from src.core.defs import TRANSPARENT
+from src.core.defs import TRANSPARENT, BLACK, MAGENTA
 from src.core.shot import CtxShot
-from src.core.utils import img_from_fbo, overlay, crop_to_content
+from src.core.utils import img_from_fbo, overlay, crop_to_content, gen_checkerboard_tex
 
 
 class ProjectMode(Enum):
@@ -30,11 +30,24 @@ class Renderer:
 
     def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
                  texture: Optional[TextureData] = None):
+        """
+        Initializes a new ``Renderer`` object
+        :param resolution: The resolution of the images to render
+        :param ctx: The ModernGL context to be used by the renderer
+        :param camera: The camera to be used by the renderer
+        :param mesh: The mesh data of the main mesh the renderer should work with. It represents the canvas and or
+        background of all done projections or renders
+        :param texture: The texture data of the main mesh (optional). If no texture is given a single colored texture
+        will be generated
+        """
         self._released = False
         self._resolution = resolution
         self._ctx = ctx
         self._fbo = self._ctx.simple_framebuffer(resolution, components=4)
         self._fbo.use()
+
+        if texture is None:
+            texture = TextureData(gen_checkerboard_tex(10, 50, BLACK, MAGENTA, dtype='f4'))
 
         self._obj_prog = ctx.program(vertex_shader=self._OBJ_VERT_SHADER, fragment_shader=self._OBJ_FRAG_SHADER)
         self._obj = RenderObject.from_mesh(self._obj_prog, mesh, texture, self._PAR_POS, self._PAR_UV)
@@ -87,20 +100,16 @@ class Renderer:
         return img_from_fbo(self._fbo)
 
     def _use_shot(self, shot: CtxShot):
-        shot.use()
+        shot.tex_use()
         self._shot_prog[self._PAR_SHOT_PROJ].write(shot.get_proj())
         self._shot_prog[self._PAR_SHOT_VIEW].write(shot.get_view())
 
-    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
-                      save: bool = False, save_name_iter: Optional[Iterator[str]] = None) -> Optional[list[NDArray]]:
+    def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode) -> Iterator[NDArray]:
         """
         Projects and renders all passed shots
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
-        :param save: Whether the images should be directly saved instead of being returned
-        :param save_name_iter: An iterator iterating over file names to be used when the projections should be saved
-        instead of being returned
-        :return: A list of images representing all done projections
+        :return: An iterator iterating over all performed projections
         """
         if not isinstance(shots, Iterable):
             shots = [shots]
@@ -111,6 +120,24 @@ class Renderer:
         else:
             def process_proj(proj: NDArray) -> NDArray: return crop_to_content(proj)
 
+        for shot in shots:
+            self._fbo.clear(*TRANSPARENT)
+            self._use_shot(shot)
+            self._shot.render()
+            result = process_proj(img_from_fbo(self._fbo))
+            yield result
+
+    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
+                      save: bool = False, save_name_iter: Optional[Iterator[str]] = None) -> Optional[list[NDArray]]:
+        """
+        Projects and renders all passed shots
+        :param shots: A single or multiple shots to be projected
+        :param mode: The projection mode to be used
+        :param save: Whether the images should be directly saved instead of being returned
+        :param save_name_iter: An iterator iterating over file names to be used when the projections should be saved
+        instead of being returned
+        :return: If save is ``True`` ``None``; otherwise a list of images representing all performed projections
+        """
         if save:
             results = None
             def handle_result(res: NDArray) -> NDArray: return cv2.imwrite(next(save_name_iter), res)
@@ -118,11 +145,7 @@ class Renderer:
             results = []
             def handle_result(res: NDArray) -> None: results.append(res)
 
-        for shot in shots:
-            self._fbo.clear(*TRANSPARENT)
-            self._use_shot(shot)
-            self._shot.render()
-            result = process_proj(img_from_fbo(self._fbo))
+        for result in self.project_shots_iter(shots, mode):
             handle_result(result)
 
         return results

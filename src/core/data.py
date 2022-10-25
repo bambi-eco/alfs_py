@@ -70,7 +70,7 @@ class RenderObject:
 
     def tex_use(self) -> None:
         """
-        Binds the texture to a texture unit
+        Binds the texture of this object to a texture unit
         """
         if self.tex is not None:
             self.tex.use()

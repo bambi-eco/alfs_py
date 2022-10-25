@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from pyrr import Vector3
 
 from src.core.data import MeshData, TextureData, AABB
+from src.core.defs import Color
 
 
 def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[Any] = None) -> Any:
@@ -331,3 +332,46 @@ def make_plane(size: float = 1.0, y: float = 0.0) -> MeshData:
     indices = np.array([0, 1, 2, 2, 3, 0])
     uvs = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
     return MeshData(vertices, indices, uvs)
+
+
+def int_up(val: float) -> int:
+    """
+    Rounds a float up and casts it to an integer
+    :param val: The value to round up
+    :return: The rounded up integer
+    """
+    return int(val + 0.5)
+
+
+def gen_checkerboard_tex(tile_per_side: int, tile_size: int, tile_color: Color, non_tile_color: Color,
+                         dtype: object = float) -> NDArray:
+    """
+    Generates a numpy array representing a checkerboard texture
+    :param tile_per_side: The amount of tiles per side
+    :param tile_size: The side length of a tile in pixels
+    :param tile_color: The color of a tile
+    :param non_tile_color: The color of the lack of a tile
+    :param dtype: The dtype to convert all values within the numpy to (defaults to float)
+    :return: A numpy array representing a checkerboard texture
+    """
+    t_c = np.array(tile_color).reshape((-1))
+    nt_c = np.array(non_tile_color).reshape((-1))
+
+    if t_c.shape != nt_c.shape:
+        raise ValueError('Both given colors have to have the same amount of components')
+
+    if tile_per_side == 0 or tile_size == 0:
+        return np.empty((0, 0, t_c.shape[0]), dtype=dtype)
+
+    depth = t_c.shape[0]
+    tile = np.empty((tile_size, tile_size, depth), dtype=dtype)
+    n_tile = np.empty_like(tile)
+    tile[..., :] = t_c
+    n_tile[..., :] = nt_c
+
+    odd_line = cv2.hconcat([tile if i % 2 == 0 else n_tile for i in range(0, tile_per_side)])
+    even_line = cv2.hconcat([tile if i % 2 == 1 else n_tile for i in range(0, tile_per_side)])
+    result = cv2.vconcat([odd_line if i % 2 == 0 else even_line for i in range(0, tile_per_side)])
+
+    return result
+
