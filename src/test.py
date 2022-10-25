@@ -1,4 +1,4 @@
-from typing import Final
+from typing import Final, Generator, Sequence, Iterator, Optional, cast
 
 import cv2
 import moderngl as mgl
@@ -200,6 +200,20 @@ def test_crop_to_content():
 
 
 def test_projection():
+
+    def file_name_gen(filetype: str, prefix: Optional[str] = None, suffix: Optional[str] = None) -> Iterator[str]:
+        r_filetype = str(filetype) if filetype.startswith('.') else f'.{filetype}'
+        r_prefix = f'{prefix}_' if prefix is not None else ''
+        r_suffix = f'_{suffix}' if suffix is not None else ''
+
+        def gen() -> str:
+            i = 0
+            while True:
+                yield f'{r_prefix}{i}{r_suffix}{r_filetype}'
+                i += 1
+
+        return gen()
+
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
 
@@ -216,12 +230,8 @@ def test_projection():
     json_file = f'{ROOT_DIR}\\..\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
     shots = CtxShot.from_json(json_file, ctx)
 
-    projections = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW)
-
-    for projection in projections:
-        cv2.imshow('proj', projection)
-        cv2.waitKey()
-        cv2.destroyAllWindows()
+    file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
+    renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=True, save_name_iter=file_name_iter)
 
 
 def main() -> None:

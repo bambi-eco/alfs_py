@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Final, Optional, Iterable, Union
+from typing import Final, Optional, Iterable, Union, Iterator
 
 import cv2
 from moderngl import Context, Program, Framebuffer
@@ -91,32 +91,43 @@ class Renderer:
         self._shot_prog[self._PAR_SHOT_PROJ].write(shot.get_proj())
         self._shot_prog[self._PAR_SHOT_VIEW].write(shot.get_view())
 
-    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode) -> list[NDArray]:
+    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
+                      save: bool = False, save_name_iter: Optional[Iterator[str]] = None) -> Optional[list[NDArray]]:
         """
         Projects and renders all passed shots
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
+        :param save: Whether the images should be directly saved instead of being returned
+        :param save_name_iter: An iterator iterating over file names to be used when the projections should be saved
+        instead of being returned
         :return: A list of images representing all done projections
         """
         if not isinstance(shots, Iterable):
             shots = [shots]
-        results = []
+
+        if mode is ProjectMode.COMPLETE_VIEW:
+            background = self.render_ground()
+            def process_proj(proj: NDArray) -> NDArray: return overlay(background, proj)
+        else:
+            def process_proj(proj: NDArray) -> NDArray: return crop_to_content(proj)
+
+        if save:
+            results = None
+            def handle_result(res: NDArray) -> NDArray: return cv2.imwrite(next(save_name_iter), res)
+        else:
+            results = []
+            def handle_result(res: NDArray) -> None: results.append(res)
 
         for shot in shots:
             self._fbo.clear(*TRANSPARENT)
             self._use_shot(shot)
             self._shot.render()
-            results.append(img_from_fbo(self._fbo))
-
-        if mode is ProjectMode.COMPLETE_VIEW:
-            background = self.render_ground()
-            cv2.imshow('wow', background)
-            results = [overlay(background, result) for result in results]
-
-        elif mode is ProjectMode.SHOT_VIEW:
-            results = [crop_to_content(result) for result in results]
+            result = process_proj(img_from_fbo(self._fbo))
+            handle_result(result)
 
         return results
+
+    # region Shader Constants
 
     _PAR_POS: Final[str] = 'v_in_v3_pos'
     _PAR_UV: Final[str] = 'v_in_v2_uv'
@@ -198,3 +209,5 @@ class Renderer:
         }}
     }}
     """
+
+    # endregion

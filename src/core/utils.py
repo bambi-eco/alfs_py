@@ -105,10 +105,10 @@ def overlay(img_a: NDArray, img_b: NDArray) -> Optional[NDArray]:
     alpha = img_b[..., 3]
     fact = (255.0 - alpha) / 255.0
 
-    for i in range(0, result.shape[-1]):
+    # scale all layers accept alpha according to the overlays alpha values
+    for i in range(0, result.shape[-1] - 1):
         result[..., i] = (result[..., i] * fact).astype(img_a.dtype)
         over[..., i] = (over[..., i] * alpha).astype(img_b.dtype)
-    # img_b[..., 0:3] *= img_b[..., 3]
     result += over
     return result
 

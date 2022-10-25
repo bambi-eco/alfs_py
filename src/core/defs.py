@@ -11,7 +11,7 @@ EPSILON: Final[float] = sys.float_info.epsilon
 
 # DIRECTORIES
 ROOT_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.parent.absolute())}{PATH_SEP}'
-MODULE_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.absolute())}'
+MODULE_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.absolute())}{PATH_SEP}'
 INPUT_DIR: Final[str] = f'{ROOT_DIR}input{PATH_SEP}'
 OUTPUT_DIR: Final[str] = f'{ROOT_DIR}output{PATH_SEP}'
 
