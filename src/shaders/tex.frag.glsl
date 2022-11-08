@@ -1,11 +1,12 @@
 #version 330
 
-in vec2 uv_cord;
+in vec2 v_out_v2_uv;
 
-uniform sampler2D tex_sampler;
+uniform sampler2D u_s2d_tex;
 
-out vec4 f_color;
+out vec4 f_out_v4_color;
 
 void main() {
-    f_color = texture(tex_sampler, uv_cord);
+    vec3 normal = normalize(texture(u_s2d_tex, v_out_v2_uv).xyz);
+    f_out_v4_color = vec4(normal.xyz, 1.0);
 }

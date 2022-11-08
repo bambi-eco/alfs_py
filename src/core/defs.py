@@ -23,8 +23,14 @@ OUTPUT_DIR: Final[str] = f'{ROOT_DIR}output{PATH_SEP}'
 SHADERS_PATH: Final[str] = f'{MODULE_DIR}{PATH_SEP}shaders{PATH_SEP}'
 COL_VERT_SHADER_PATH: Final[str] = f'{SHADERS_PATH}col.vert.glsl'
 COL_FRAG_SHADER_PATH: Final[str] = f'{SHADERS_PATH}col.frag.glsl'
+FLAT_VERT_SHADER_PATH: Final[str] = f'{SHADERS_PATH}flat.vert.glsl'
+FLAT_FRAG_SHADER_PATH: Final[str] = f'{SHADERS_PATH}flat.frag.glsl'
 TEX_VERT_SHADER_PATH: Final[str] = f'{SHADERS_PATH}tex.vert.glsl'
 TEX_FRAG_SHADER_PATH: Final[str] = f'{SHADERS_PATH}tex.frag.glsl'
+DEF_VERT_SHADER_PATH: Final[str] = f'{SHADERS_PATH}def.vert.glsl'
+DEF_FRAG_SHADER_PATH: Final[str] = f'{SHADERS_PATH}def.frag.glsl'
+DEF_PASS_VERT_SHADER_PATH: Final[str] = f'{SHADERS_PATH}def_pass.vert.glsl'
+DEF_PASS_FRAG_SHADER_PATH: Final[str] = f'{SHADERS_PATH}def_pass.frag.glsl'
 
 # COLORS
 BLACK: Final[tuple[float, float, float]] = (0.0, 0.0, 0.0)

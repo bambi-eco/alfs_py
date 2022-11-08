@@ -28,13 +28,14 @@ def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[A
     return default
 
 
-def img_from_fbo(fbo: Framebuffer) -> NDArray[np.uint8]:
+def img_from_fbo(fbo: Framebuffer, attachment: int = 0) -> NDArray[np.uint8]:
     """
     Reads image data from the FBO and turns it into an OpenCV representation (BGRA)
     :param fbo: The frame buffer to read image data from
+    :param attachment: Number of the color attachment to read from
     :return: A numpy array containing the image
     """
-    raw = fbo.read(components=4, dtype='f1')
+    raw = fbo.read(components=4, attachment=attachment, dtype='f1')
     img = np.frombuffer(raw, dtype=np.uint8).reshape((*fbo.size[1::-1], 4))
     img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
     return cv2.flip(img, 0)  # modern gl seems to vertically flip output
@@ -332,6 +333,19 @@ def make_plane(size: float = 1.0, y: float = 0.0) -> MeshData:
     indices = np.array([0, 1, 2, 2, 3, 0])
     uvs = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
     return MeshData(vertices, indices, uvs)
+
+
+def make_quad() -> MeshData:
+    """
+    :return: Mesh data representing a quad covering the entire screen in a deferred shading scenario
+    """
+    vertices = np.array([[-1.0,  1.0, 0.0], [-1.0, -1.0, 0.0],
+                         [1.0, -1.0, 0.0], [1.0,  1.0, 0.0]])
+
+    uvs = np.array([[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
+    indices = np.array([0, 1, 2, 1, 2, 3])
+
+    return MeshData(vertices=vertices, indices=indices, uvs=uvs)
 
 
 def int_up(val: float) -> int:

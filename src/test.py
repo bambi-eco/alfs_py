@@ -7,12 +7,13 @@ from pyrr import Matrix44, Vector3
 
 from src.core.camera import Camera
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
-    TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, ROOT_DIR
+    TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, ROOT_DIR, DEF_FRAG_SHADER_PATH, \
+    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
-    get_center, int_up, gen_checkerboard_tex
+    get_center, int_up, make_quad
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024, 1024)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -77,7 +78,7 @@ def gltf_lib_test() -> None:
     uvs = mesh_data.uvs
 
     center, _ = get_center(vertices)
-    x_tsl, y_tsl = center
+    x_tsl, y_tsl, _ = center
 
     camera = Camera(orthogonal=False, orthogonal_size=(1024, 1024), position=Vector3([0, 0, 750]))
     camera.look_at(Vector3([0, 0, 0]))
@@ -109,7 +110,7 @@ def gltf_lib_test() -> None:
 
     vbo = ctx.buffer(reserve=5 * 4 * vertices.shape[0])
     ibo = ctx.buffer(indices.tobytes())
-    vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'pos_in', 'uv_cord_in')], index_buffer=ibo, index_element_size=4)
+    vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'v_in_v3_pos', 'v_in_v2_uv')], index_buffer=ibo, index_element_size=4)
     # vao = ctx.vertex_array(prog, [(vetices, '3f4 2f4', 'pos_in', 'uv_cord_in')])
 
     x, y, z = split_components(vertices)
@@ -127,12 +128,8 @@ def gltf_lib_test() -> None:
 
     print()
 
-    tex.release()
-    vao.release()
-    vbo.release()
-    fbo.release()
-    prog.release()
-    ctx.release()
+    for releasable in (tex, vao, vbo, fbo, prog, ctx):
+        releasable.release()
 
 
 def test_lines():
@@ -160,12 +157,8 @@ def test_lines():
     fbo = ctx.simple_framebuffer(_OUTPUT_RESOLUTION, components=4)
     fbo.use()
 
-    x = vertices[..., 0]
-    y = vertices[..., 1]
-    z = vertices[..., 2]
-    r = col[..., 0]
-    g = col[..., 1]
-    b = col[..., 2]
+    x, y, z = split_components(vertices)
+    r, g, b = split_components(col)
     a = np.ones(x.shape)
     shader_data = np.dstack([x, y, z, r, g, b, a])
     vbo = ctx.buffer(shader_data.astype('f4').tobytes())
@@ -200,7 +193,7 @@ def test_crop_to_content():
     cv2.imwrite(f'{OUTPUT_DIR}crop.png', img)
 
 
-def test_projection():
+def test_projection(count: int = 1):
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
 
@@ -215,7 +208,7 @@ def test_projection():
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
     json_file = f'{ROOT_DIR}\\..\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
-    shots = CtxShot.from_json(json_file, ctx, count=1)
+    shots = CtxShot.from_json(json_file, ctx, count=count)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
     renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=True, save_name_iter=file_name_iter)
@@ -227,8 +220,95 @@ def test_projection():
     ctx.release()
 
 
+def test_deferred_shading() -> None:
+    file = f'{INPUT_DIR}mesh.glb'
+
+    mesh_data, tex_data = gltf_extract(file)
+
+    vertices = mesh_data.vertices
+    indices = mesh_data.indices
+
+    center, aabb = get_center(mesh_data.vertices)
+    center.z = 750
+    ortho_size = int_up(aabb.width), int_up(aabb.height)
+
+    camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
+    projection = camera.get_proj()
+    view = camera.get_view()
+    model = Matrix44.identity(dtype='f4')
+
+    ctx = mgl.create_context(standalone=True)
+    ctx.enable(mgl.DEPTH_TEST)
+
+    # first pass
+    with open(DEF_PASS_VERT_SHADER_PATH) as file:
+        vert_shader = file.read()
+    with open(DEF_PASS_FRAG_SHADER_PATH) as file:
+        frag_shader = file.read()
+    prog = ctx.program(vertex_shader=vert_shader, fragment_shader=frag_shader,
+                       fragment_outputs={'f_out_v4_dir': 0, 'f_out_v4_dist': 1})
+
+    prog['u_m4_proj'].write(projection.tobytes())
+    prog['u_m4_view'].write(view.tobytes())
+    prog['u_m4_model'].write(model.tobytes())
+
+    dir_rbo = ctx.renderbuffer(_OUTPUT_RESOLUTION, 4)
+    dist_rbo = ctx.renderbuffer(_OUTPUT_RESOLUTION, 4)
+    dbo = ctx.depth_renderbuffer(_OUTPUT_RESOLUTION)
+    fbo = ctx.framebuffer([dir_rbo, dist_rbo], dbo)
+    fbo.use()
+
+    vbo = ctx.buffer(vertices.tobytes())
+    ibo = ctx.buffer(indices.tobytes())
+    vao = ctx.vertex_array(prog, [(vbo, '3f4', 'v_in_v3_pos')], index_buffer=ibo, index_element_size=4)
+
+    ctx.clear(*_CLEAR_COLOR)
+    vao.render(mgl.TRIANGLES)
+
+    # copy color attachments of first pass into textures
+    dir_tex = ctx.texture(_OUTPUT_RESOLUTION, 4)
+    dist_tex = ctx.texture(_OUTPUT_RESOLUTION, 4)
+    fbo_tex = ctx.framebuffer((dir_tex, dist_tex))
+    ctx.copy_framebuffer(fbo_tex, fbo)
+
+    for releasable in (fbo, dbo, dist_rbo, dir_rbo, vao, ibo, vbo, prog):
+        releasable.release()
+
+    # second Pass
+    with open(DEF_VERT_SHADER_PATH) as file:
+        vert_shader = file.read()
+    with open(DEF_FRAG_SHADER_PATH) as file:
+        frag_shader = file.read()
+    prog = ctx.program(vertex_shader=vert_shader, fragment_shader=frag_shader)
+
+    # bind results of previous pass
+    dir_tex.use(0)
+    dist_tex.use(1)
+
+    quad = make_quad()
+    x, y, z = split_components(quad.vertices)
+    u, v = split_components(quad.uvs)
+    shader_data = np.dstack([x, y, z, u, v])
+    vbo = ctx.buffer(shader_data.tobytes())
+    ibo = ctx.buffer(indices.tobytes())
+    vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'v_in_v3_pos', 'v_in_v2_uv')],
+                           index_buffer=ibo, index_element_size=4)
+    fbo = ctx.simple_framebuffer(_OUTPUT_RESOLUTION, components=4)
+    fbo.use()
+    fbo.clear()
+    vao.render()
+    render = img_from_fbo(fbo, attachment=0)
+
+    cv2.imwrite(f'{OUTPUT_DIR}def_render.png', render)
+
+    for releasable in (fbo, vao, ibo, vbo, dist_tex, dir_tex, fbo_tex, prog, ctx):
+        releasable.release()
+        
+    # TODO: fix second pass not rendering anything
+
+
 def main() -> None:
-    test_projection()
+    test_deferred_shading()
 
 
 if __name__ == '__main__':

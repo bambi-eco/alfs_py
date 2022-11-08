@@ -94,7 +94,7 @@ class Renderer:
         Renders the ground object
         :return: The finished render result
         """
-        self._fbo.clear(*TRANSPARENT)
+        self._ctx.clear(*TRANSPARENT)
         self._obj.tex_use()
         self._obj.render()
         return img_from_fbo(self._fbo)
@@ -121,7 +121,7 @@ class Renderer:
             def process_proj(proj: NDArray) -> NDArray: return crop_to_content(proj)
 
         for shot in shots:
-            self._fbo.clear(*TRANSPARENT)
+            self._ctx.clear(*TRANSPARENT)
             self._use_shot(shot)
             self._shot.render()
             result = process_proj(img_from_fbo(self._fbo))
@@ -154,8 +154,8 @@ class Renderer:
 
     _PAR_POS: Final[str] = 'v_in_v3_pos'
     _PAR_UV: Final[str] = 'v_in_v2_uv'
-    _PAR_PROJ: Final[str] = 'u_m4_proj'
-    _PAR_VIEW: Final[str] = 'u_m4_view'
+    _PAR_PROJ: Final[str] =  'u_m4_proj'
+    _PAR_VIEW: Final[str] =  'u_m4_view'
     _PAR_MODEL: Final[str] = 'u_m4_model'
     _PAR_TEX: Final[str] = 'u_s2_tex'
     _PAR_SHOT_PROJ: Final[str] = 'u_m4_shot_proj'

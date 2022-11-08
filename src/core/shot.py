@@ -1,5 +1,4 @@
 import json
-import os.path
 import pathlib
 from typing import Union, Final, Optional
 
@@ -20,6 +19,7 @@ class Shot:
     Represents the combination of a camera and a picture taken by that camera
     """
     camera: Final[Camera]
+    # TODO: Add model matrix for corrections
     _tex_data: TextureData
 
     def __init__(self, img: Union[str, NDArray], position: Vector3, rotation: Quaternion, fovy: float = 60.0,
