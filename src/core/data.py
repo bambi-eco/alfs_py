@@ -169,3 +169,15 @@ class AABB:
         :return: The depth / length in Z direction of the AABB
         """
         return abs(self.p_e.z - self.p_s.z)
+
+    @property
+    def corners(self) -> tuple[Vector3, Vector3, Vector3, Vector3, Vector3, Vector3, Vector3, Vector3]:
+        """
+        :return: The corners of the AABB from front to back, bottom to top, and left to right
+        """
+        min_x, min_y, min_z = self.p_s
+        max_x, max_y, max_z = self.p_s
+        return Vector3([min_x, min_y, min_z]), Vector3([min_x, min_y, max_z]), \
+               Vector3([min_x, max_y, min_z]), Vector3([min_x, max_y, max_z]), \
+               Vector3([max_x, min_y, min_z]), Vector3([max_x, min_y, max_z]), \
+               Vector3([max_x, max_y, min_z]), Vector3([max_x, max_y, max_z])

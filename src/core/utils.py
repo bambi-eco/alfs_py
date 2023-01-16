@@ -1,5 +1,5 @@
 import base64
-from typing import Union, Optional, Iterable, Sequence, Any
+from typing import Union, Optional, Iterable, Sequence, Any, Type, cast
 from urllib.request import urlopen
 
 import cv2
@@ -198,7 +198,7 @@ def crop_to_content(img: NDArray, return_delta: bool = False) -> Union[NDArray, 
     if return_delta:
         old_center = Vector3([width / 2.0, height / 2.0, 0.0])
         new_center = Vector3([left + (right - left) / 2.0, top + (bottom - top) / 2.0, 0.0])
-        delta = old_center - new_center
+        delta = new_center - old_center
         return crop, delta
     else:
         return crop
@@ -355,6 +355,33 @@ def int_up(val: float) -> int:
     :return: The rounded up integer
     """
     return int(val + 0.5)
+
+
+def is_any(obj: Any, *classes: type) -> bool:
+    """
+    Checks whether the given object is an instance of at least one of the given classes
+    :param obj: The object to check
+    :param classes: The classes to be checked
+    :return: ``True`` if the object is instance of at least one of the given classes; otherwise ``False``
+    """
+    length = len(classes)
+    i = 0
+    result = False
+    while not result and i < length:
+        cur_class = classes.__getitem__(i)
+        result = isinstance(obj, cur_class)
+        i += 1
+    return result
+
+
+def is_same(obj: Any, other: Any) -> bool:
+    """
+    Checks whether two objects are instances of the same class
+    :param obj: The first object to check
+    :param other: The object whose type should be used for the check
+    :return: ``True`` if `obj` is an instance of the same type as `other`; otherwise ``False``
+    """
+    return isinstance(obj, type(other))
 
 
 def gen_checkerboard_tex(tile_per_side: int, tile_size: int, tile_color: Color, non_tile_color: Color,

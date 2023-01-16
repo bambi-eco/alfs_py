@@ -13,12 +13,62 @@ class Transform:
     _rotation: Quaternion
     _scale: Vector3
 
-    def __init__(self, position: Optional[Vector3] = None,
-                 rotation: Optional[Quaternion] = None,
+    def __init__(self, position: Optional[Vector3] = None, rotation: Optional[Quaternion] = None,
                  scale: Optional[Vector3] = None):
+        """
+        Class representing a position, rotation, and scale of geometry in 3D space
+        :param position: The position in 3D space (optional)
+        :param rotation: The rotation in 3D space (optional)
+        :param scale: The scale along each axis (optional)
+        """
         self._position = Vector3(position) if position is not None else Vector3([0.0, 0.0, 0.0])
         self._rotation = Quaternion(rotation) if rotation is not None else Quaternion([0.0, 0.0, 0.0, 1.0])
         self._scale = Vector3(scale) if scale is not None else Vector3([1.0, 1.0, 1.0])
+
+    @staticmethod
+    def from_up_forward(up: Vector3, forward: Vector3, position: Optional[Vector3] = None, scale: Optional[Vector3] = None):
+        """
+        Creates a ``Transform`` object based on the rotation defined by an up and forward vector
+        :param up: The up vector of the transform
+        :param forward: The forward vector of the transform
+        :param position: The position in 3D space (optional)
+        :param scale: The scale along each axis (optional)
+        :return: A ``Transform`` instance initialized respectively
+        """
+        if up.dot(forward) > 0.000125:
+            raise ValueError('The up and forward vector have to be orthogonal')
+
+        target = position + forward.normalized
+        rotation = Quaternion.from_matrix(Matrix44.look_at(position, target, up.normalized))
+        return Transform(position, rotation, scale)
+
+    @property
+    def trans_mat(self) -> Matrix44:
+        """
+        :return: A matrix representing the translation of the transform
+        """
+        return Matrix44.from_translation(self._position)
+
+    @property
+    def rot_mat(self) -> Matrix44:
+        """
+        :return: A matrix representing the rotation of the transform
+        """
+        return Matrix44.from_quaternion(self._rotation)
+
+    @property
+    def scale_mat(self) -> Matrix44:
+        """
+        :return: A matrix representing the scale of the transform
+        """
+        return Matrix44.from_scale(self._scale)
+
+    @property
+    def mat(self) -> Matrix44:
+        """
+        :return: A matrix representing the entire transform
+        """
+        return self.trans_mat * self.rot_mat * self.scale_mat
 
     @property
     def up(self) -> Vector3:

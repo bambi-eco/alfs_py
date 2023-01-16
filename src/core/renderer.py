@@ -4,18 +4,19 @@ from typing import Final, Optional, Iterable, Union, Iterator
 import cv2
 from moderngl import Context, Program, Framebuffer
 from numpy.typing import NDArray
-from pyrr import Matrix44
+from pyrr import Matrix44, Vector3
 
 from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject
 from src.core.defs import TRANSPARENT, BLACK, MAGENTA
 from src.core.shot import CtxShot
-from src.core.utils import img_from_fbo, overlay, crop_to_content, gen_checkerboard_tex
+from src.core.utils import img_from_fbo, overlay, crop_to_content, gen_checkerboard_tex, get_center, int_up
 
 
 class ProjectMode(Enum):
     COMPLETE_VIEW = 0,
-    SHOT_VIEW = 1
+    SHOT_VIEW = 1,
+    SHOT_VIEW_CROPPED = 2,
 
 
 class Renderer:
@@ -117,6 +118,8 @@ class Renderer:
         if mode is ProjectMode.COMPLETE_VIEW:
             background = self.render_ground()
             def process_proj(proj: NDArray) -> NDArray: return overlay(background, proj)
+        elif mode is ProjectMode.SHOT_VIEW:
+            def process_proj(proj: NDArray) -> NDArray: return proj
         else:
             def process_proj(proj: NDArray) -> NDArray: return crop_to_content(proj)
 
@@ -138,6 +141,7 @@ class Renderer:
         instead of being returned
         :return: If save is ``True`` ``None``; otherwise a list of images representing all performed projections
         """
+
         if save:
             results = None
             def handle_result(res: NDArray) -> NDArray: return cv2.imwrite(next(save_name_iter), res)
@@ -234,3 +238,40 @@ class Renderer:
     """
 
     # endregion
+
+class CenteredRenderer(Renderer):
+    def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
+                 texture: Optional[TextureData] = None):
+        """
+        Initializes a new ``Renderer`` object
+        :param resolution: The resolution of the images to render
+        :param ctx: The ModernGL context to be used by the renderer
+        :param camera: A camera object holding the desired properties the centered camera should have. The centered
+        camera will adjust position and alter the far clipping plane distance if needed.
+        :param mesh: The mesh data of the main mesh the renderer should work with. It represents the canvas and or
+        background of all done projections or renders
+        :param texture: The texture data of the main mesh (optional). If no texture is given a single colored texture
+        will be generated
+        """
+        center, aabb = get_center(mesh.vertices)
+        if camera.orthogonal:
+            center.z = 1
+            ortho_size = int_up(aabb.width), int_up(aabb.height)
+            camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
+        else:
+            camera_dir = (camera.transform.position - center).normalized
+            corner_dist = (aabb.p_s - center).length
+
+
+            if camera.aspect_ratio <= 1.0:
+                # fit cameras distance based on the fovy
+                pass
+            else:
+                # fit cameras distance based on the fovx
+                fovx = camera.fovy * camera.aspect_ratio
+
+
+
+            camera = Camera()
+
+        super().__init__(resolution, ctx, camera, mesh, texture)

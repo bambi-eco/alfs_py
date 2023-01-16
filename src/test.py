@@ -1,21 +1,25 @@
-from typing import Final
+from itertools import tee, product
+from typing import Final, Iterable, Callable, Union
 
 import cv2
 import moderngl as mgl
 import numpy as np
-from pyrr import Matrix44, Vector3
+from numpy import deg2rad
+from pyrr import Matrix44, Vector3, Quaternion
 
 from src.core.camera import Camera
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
     TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, ROOT_DIR, DEF_FRAG_SHADER_PATH, \
-    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
+    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, UP
+from src.core.geo.frustum import Frustum
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
+from src.core.transform import Transform
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
-    get_center, int_up, make_quad
+    get_center, int_up, make_quad, is_any
 
-_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024, 1024)
+_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
 
 _FOV: Final[float] = 45.0
@@ -207,11 +211,26 @@ def test_projection(count: int = 1):
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
-    json_file = f'{ROOT_DIR}\\..\\alfs-web\\data\\BAMBI_202208240731_008_Tierpark-Haag-deer1\\poses.json'
+    json_file = f'{INPUT_DIR}data\\poses.json'
     shots = CtxShot.from_json(json_file, ctx, count=count)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-    renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=True, save_name_iter=file_name_iter)
+    results = renderer.project_shots(shots, ProjectMode.SHOT_VIEW, save=False, save_name_iter=file_name_iter)
+
+    res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
+    res_center_tup = int_up(res_center[0]), int_up(res_center[1])
+    for result in results:
+        crop, delta = crop_to_content(result, return_delta=True)
+        h, w = crop.shape[0:2]
+        c_d = Vector3([w / 2.0, h / 2.0, 0])
+        print(f'tl: {res_center + delta - c_d} | br: {res_center + delta + c_d}')
+
+        res_delta = (int_up(res_center[0] + delta[0]), int_up(res_center[1] + delta[1]))
+        cv2.line(result, res_center_tup, res_delta, (255, 0, 0), 5)
+        result = cv2.resize(result, None, None, 0.5, 0.5)
+        cv2.imshow('delta', result)
+        cv2.waitKey()
+        cv2.destroyAllWindows()
 
     for shot in shots:
         shot.release()
@@ -303,12 +322,28 @@ def test_deferred_shading() -> None:
 
     for releasable in (fbo, vao, ibo, vbo, dist_tex, dir_tex, fbo_tex, prog, ctx):
         releasable.release()
-        
+
     # TODO: fix second pass not rendering anything
+
+def test_frustum() -> None:
+    rotation = Matrix44.look_at(Vector3(), Vector3([1.0, 1.0, 1.0]), UP)
+    transform = Transform(rotation=rotation)
+    frustum = Frustum(60, 2, near=1, far=4, transform=transform)
+
+    corners = frustum.corners
+    for i, corner in enumerate(corners):
+        print(f'Corner {chr(65+i)} = ({corner.x:.9f}, {corner.y:.9f}, {corner.z:.9f}) | Length {corner.length}')
 
 
 def main() -> None:
-    test_deferred_shading()
+    # test_projection(5)
+
+    test_frustum()
+
+    # for r1, r2 in list(product(rad_t, rad_t)):
+    #     print(f'[{r1:.3f}, {r2:.3f}, 0.000]: {Quaternion.from_eulers([r1, r2, 0.0]) * forward}')
+    #     print(f'[{r1:.3f}, 0.000, {r2:.3f}]: {Quaternion.from_eulers([r1, 0.0, r2]) * forward}')
+    #     print(f'[0.000, {r1:.3f}, {r2:.3f}]: {Quaternion.from_eulers([0.0, r1, r2]) * forward}')
 
 
 if __name__ == '__main__':
