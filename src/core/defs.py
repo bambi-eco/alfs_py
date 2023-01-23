@@ -1,6 +1,7 @@
 import os
 import pathlib
 import sys
+from enum import Enum
 from typing import Final, Type, Union
 
 from pyrr import Vector3
@@ -12,6 +13,9 @@ EPSILON: Final[float] = sys.float_info.epsilon
 # TYPES
 Number: Type = Union[int, float]
 Color: Type = Union[Number, tuple[Number, Number, Number], tuple[Number, Number, Number, Number]]
+
+class StrEnum(str, Enum):
+    pass
 
 # DIRECTORIES
 ROOT_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.parent.absolute())}{PATH_SEP}'

@@ -1,5 +1,6 @@
 import base64
-from typing import Union, Optional, Iterable, Sequence, Any, Type, cast
+from statistics import fmean
+from typing import Union, Optional, Iterable, Sequence, Any, Type, cast, Collection
 from urllib.request import urlopen
 
 import cv2
@@ -168,7 +169,7 @@ def crop_to_content(img: NDArray, return_delta: bool = False) -> Union[NDArray, 
     :return: A copy of the cropped segment of the given image
     """
     if img.shape[0] == 0 or img.shape[1] == 0:  # image has no pixels
-        return img.copy()
+        return img.copy(), Vector3() if return_delta else img.copy()
 
     height, width = img.shape[0:2]
     max_x = width - 1
@@ -181,7 +182,7 @@ def crop_to_content(img: NDArray, return_delta: bool = False) -> Union[NDArray, 
             unq_colors.append(color)
 
     if len(unq_colors) >= 4:  # cannot crop since all corners have different colors
-        return img.copy()
+        return img.copy(), Vector3() if return_delta else img.copy()
 
     # search the biggest border possible with any of the unique corner colors
     max_border_size = -1
@@ -415,4 +416,40 @@ def gen_checkerboard_tex(tile_per_side: int, tile_size: int, tile_color: Color, 
     result = cv2.vconcat([odd_line if i % 2 == 0 else even_line for i in range(0, tile_per_side)])
 
     return result
+
+def vector_project(a: Vector3, b:Vector3) -> Vector3:
+    """
+    Projects the vector a onto the vector b
+    :param a: The vector to be projected
+    :param b: The vector to be projected onto
+    :return: A new vector representing the portion of the vector a pointing in the direction of vector b
+    """
+    return (a.dot(b)/b.dot(b)) * b
+
+def vector_mean(vectors: Collection[Vector3]) -> Vector3:
+    """
+    Computes the mean vector of a set of vectors
+    :param vectors: The vectors to aggregate
+    :return: The mean vector
+    """
+    x_vals = []
+    y_vals = []
+    z_vals = []
+    for vector in vectors:
+        x_vals.append(vector.x)
+        y_vals.append(vector.y)
+        z_vals.append(vector.z)
+
+    return Vector3((fmean(x_vals), fmean(y_vals), fmean(z_vals)))
+
+def vector_to_geogebra(vec: Vector3, vec_name: Optional[str] = None, decimals: int = 3) -> str:
+    """
+    Turns a vector into a GeoGebra point definition
+    :param vec: The vector to transform
+    :param decimals: The amount of decimals each coordinate should be rounded to (defaults to 3)
+    :return: A string that defines a point in GeoGebra
+    """
+    definition = f'({round(vec.x, decimals)}, {round(vec.y, decimals)}, {round(vec.z, decimals)})'
+    assignment = '' if vec_name is None else f'{vec_name} = '
+    return assignment + definition
 

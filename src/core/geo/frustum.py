@@ -1,11 +1,19 @@
-from typing import Optional, Collection
+from typing import Optional, Collection, Final
 
-from numpy import deg2rad
+from numpy import deg2rad, sign, arctan, arccos, tan
 from pyrr import Vector3, Quaternion, Matrix44, Vector4
 
-from src.core.defs import FORWARD, EPSILON
+from src.core.defs import FORWARD, RIGHT, UP, StrEnum
 from src.core.geo.quad import Quad
-from src.core.transform import Transform
+from src.core.geo.transform import Transform
+
+class Side(StrEnum):
+    TOP: Final[str] = 'top'
+    RIGHT: Final[str] = 'right'
+    BOTTOM: Final[str] = 'bottom'
+    LEFT: Final[str] = 'left'
+    NEAR: Final[str] = 'near'
+    FAR: Final[str] = 'far'
 
 class Frustum:
     """
@@ -18,6 +26,10 @@ class Frustum:
     near: float
     far: float
     transform: Transform
+
+    _SIDE_NAMES: Final[tuple[Side]] = (Side.TOP, Side.RIGHT, Side.BOTTOM, Side.LEFT, Side.NEAR, Side.FAR)
+    _FULL_CORNER_NAMES: Final[tuple[str]] = ('NBL', 'NTL', 'NBR', 'NTR', 'FBL', 'FTL', 'FBR', 'FTR')
+    _CORNER_NAMES: Final[tuple[str]] = ('BL', 'TL', 'BR', 'TR')
 
     def __init__(self, fovy: float = 60.0, aspect_ratio: float = 1.0,
                  orthogonal: bool = False,
@@ -83,6 +95,15 @@ class Frustum:
         """
         return self.corners_at(self.near) + self.corners_at(self.far)
 
+    @property
+    def corners_dict(self) -> dict[str, Vector3]:
+        """
+        :return: The corners of the frustum defined by the near and far clipping distance.
+        Points are named as NBL, NTL, NBR, NTR, FBL, FTL, FBR, and FTR
+        """
+        return {key: corner for key, corner in zip(Frustum._FULL_CORNER_NAMES, self.corners)}
+
+
     def corners_at(self, depth: float) -> tuple[Vector3, Vector3, Vector3, Vector3]:
         """
         Computes the corners of the frustums slice at the given depth.
@@ -98,9 +119,17 @@ class Frustum:
         mat = self.transform.mat  # translation, rotation, and scale
 
         return mat * Vector3([-ref.x, -ref.y, ref.z]), \
-               mat * Vector3([-ref.x, ref.y, ref.z]), \
-               mat * Vector3([ref.x, -ref.y, ref.z]), \
+               mat * Vector3([-ref.x,  ref.y, ref.z]), \
+               mat * Vector3([ ref.x, -ref.y, ref.z]), \
                mat * ref
+
+    def corners_at_dict(self, depth: float) -> dict[str, Vector3]:
+        """
+        Computes the corners of the frustums slice at the given depth.
+        :param depth: The depth the frustum should be sliced at
+        :return: A map holding all corner points as BL, TL, BR, and TR
+        """
+        return {key: corner for key, corner in zip(Frustum._CORNER_NAMES, self.corners_at(depth))}
 
     @property
     def sides(self) -> tuple[Quad, Quad, Quad, Quad, Quad, Quad]:
@@ -117,6 +146,13 @@ class Frustum:
         bottom = Quad(corners[2], corners[6], corners[0], corners[4])
 
         return top, right, bottom, left, near, far
+
+    @property
+    def sides_dict(self) -> dict[str, Quad]:
+        """
+        :return: Returns a map storing the six sides of the frustum as top, right, bottom, left, near, and far.
+        """
+        return {key: quad for key, quad in zip(Frustum._SIDE_NAMES, self.sides)}
 
     def get_proj(self, dtype: object = 'f4') -> Matrix44:
         """
@@ -138,8 +174,7 @@ class Frustum:
         :param dtype: The dtype all values in the matrix should be converted to
         :return: A matrix representing a view
         """
-        return Matrix44.look_at(self.transform.position, self.transform.forward + self.transform.position,
-                                self.transform.up, dtype=dtype)
+        return Matrix44.look_at(self.transform.position, self.transform.target, self.transform.up, dtype=dtype)
 
     def get_mat(self, dtype: object = 'f4') -> Matrix44:
         """
@@ -158,12 +193,89 @@ class Frustum:
         mat = self.get_mat()
         p4 = Vector4([point.x, point.y, point.z, 1.0])
         pp = mat * p4
-        return abs(pp.x) < pp.w and abs(pp.y) < pp.w and 0 < pp.z < pp.w
+        # GLSL clipping rule
+        return abs(pp.x) <= pp.w and abs(pp.y) <= pp.w and abs(pp.z) <= pp.w
 
-    def fit_to_points(self, points: Collection[Vector3]) -> None:
+    def fit_to_points(self, points: Collection[Vector3], leeway: float) -> None:
         """
         Translates frustum along its viewing direction to capture all given points.
         This process ignores near and far clipping settings and does not modify them.
         :param points: A collection of points to capture
+        :param leeway: The maximum angle allowed between a point a side of the frustum expressed by its cosine value
         """
-        pass
+        sides = self.sides_dict
+        sides.pop('near', None)
+        sides.pop('far', None)
+        side_map = {key: (side.normal, side.a, side.center) for key, side in sides.items()}
+        max_up_angle = arctan(1.0 / self.aspect_ratio)
+
+        min_angle = float('inf')
+        min_side_name = None
+        min_side_origin = None
+        min_side_normal = None
+        min_point = None
+        min_rel_point = None
+        min_t_point = None
+        min_t_proj_r = None
+        min_t_proj_u = None
+
+        points = tuple(points)
+        for i, point in enumerate(points):
+            # project point onto relative plane of the frustums up and right vector to remove depth
+            t_point = self.transform.mat.inverse * point
+            t_proj_r = t_point * RIGHT  # vector_project(t_point, RIGHT)
+            t_proj_u = t_point * UP     # vector_project(t_point, UP)
+            t_proj = t_proj_r + t_proj_u
+
+            # find angle between local up and projection
+            t_angle = arccos(UP.dot(t_proj) / t_proj.length)
+
+            # determine which side is associated with the point via t_angle
+            if t_angle > max_up_angle:  # if angle between up and proj > arctan(1 / aspect_ratio) it is either left or right
+                if t_proj.x < 0.0:  # if x is negative cant be right side => left side
+                    side_name = Side.LEFT
+                else:  # else => right side
+                    side_name = Side.RIGHT
+            else:  # else it is either top or bottom
+                if t_proj.y < 0.0:  # if y is negative cant be top => bottom
+                    side_name = Side.BOTTOM
+                else:  # else => top
+                    side_name = Side.TOP
+
+            # compute angle between side normal and relative point
+            side_normal, side_origin, side_center = side_map[side_name]
+            rel_point = point - side_origin
+            cur_angle = side_normal.dot(rel_point) / rel_point.length
+
+            if cur_angle < min_angle:
+                min_angle = cur_angle
+                min_side_name = side_name
+                min_side_normal = side_normal
+                min_side_origin = side_origin
+                min_point = point
+                min_rel_point = rel_point
+                min_t_point = t_point
+                min_t_proj_r = t_proj_r
+                min_t_proj_u = t_proj_u
+
+
+        if min_angle < 0.0 or min_angle > leeway: # if the point lies outside the frustum or too far away from the frustum's sides
+            # get the sign of the delta by feeding the angle between forward and point to the sign function
+            # forward = self.transform.forward
+            # angle = forward.dot(min_point) / min_t_point.length
+            fact = sign(min_angle)
+
+            if min_side_name in (Side.TOP, Side.BOTTOM):
+                beta = deg2rad(90.0 - self.fovy / 2.0)
+                b = min_t_proj_u.length
+                a = b * tan(beta)
+            else:
+                beta = deg2rad(90.0 - self.fovx / 2.0)
+                b = min_t_proj_r.length
+                a = b * tan(beta)
+            delta = FORWARD * a
+
+            delta = self.transform.scale_mat * delta
+
+            # translate transform by delta in its forward direction
+            self.transform.translate(self.transform.forward * delta.length * fact)

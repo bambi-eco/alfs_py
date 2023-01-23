@@ -75,42 +75,49 @@ class Transform:
         """
         :return: The up vector of this transform
         """
-        return self._rotation * UP
+        return self.rot_mat * UP
 
     @property
     def down(self) -> Vector3:
         """
         :return: The down vector of this transform
         """
-        return self._rotation * DOWN
+        return self.rot_mat * DOWN
 
     @property
     def left(self) -> Vector3:
         """
         :return: The left vector of this transform
         """
-        return self._rotation * LEFT
+        return self.rot_mat * LEFT
 
     @property
     def right(self) -> Vector3:
         """
         :return: The right vector of this transform
         """
-        return self._rotation * RIGHT
+        return self.rot_mat * RIGHT
 
     @property
     def forward(self) -> Vector3:
         """
         :return: The forward vector of this transform
         """
-        return self._rotation * FORWARD
+        return self.rot_mat * FORWARD
 
     @property
     def back(self) -> Vector3:
         """
         :return: The back vector of this transform
         """
-        return self._rotation * BACK
+        return self.rot_mat * BACK
+
+    @property
+    def target(self) -> Vector3:
+        """
+        :return: The forward vector in world coordinates
+        """
+        return self.position + self.forward
 
     @property
     def position(self) -> Vector3:
@@ -159,7 +166,7 @@ class Transform:
 
     def look_at(self, target: Vector3, up: Optional[Vector3] = None) -> None:
         """
-        Changes the rotation of this transform so its forward vector points at the target
+        Changes the rotation of this transform so its forward vector points at the target.
         :param target: The target to point to
         :param up: The new up vector (optional)
         """

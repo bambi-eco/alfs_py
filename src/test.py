@@ -1,23 +1,21 @@
-from itertools import tee, product
-from typing import Final, Iterable, Callable, Union
+from typing import Final
 
 import cv2
 import moderngl as mgl
 import numpy as np
-from numpy import deg2rad
-from pyrr import Matrix44, Vector3, Quaternion
+from pyrr import Matrix44, Vector3
 
 from src.core.camera import Camera
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
-    TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, ROOT_DIR, DEF_FRAG_SHADER_PATH, \
-    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, UP
+    TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, DEF_FRAG_SHADER_PATH, \
+    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
 from src.core.geo.frustum import Frustum
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
-from src.core.transform import Transform
+from src.core.geo.transform import Transform
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
-    get_center, int_up, make_quad, is_any
+    get_center, int_up, make_quad
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -326,24 +324,68 @@ def test_deferred_shading() -> None:
     # TODO: fix second pass not rendering anything
 
 def test_frustum() -> None:
-    rotation = Matrix44.look_at(Vector3(), Vector3([1.0, 1.0, 1.0]), UP)
-    transform = Transform(rotation=rotation)
-    frustum = Frustum(60, 2, near=1, far=4, transform=transform)
+    transform = Transform()
+    frustum = Frustum(70.0, 16.0/9.0, near=0.001, far=10, transform=transform)
 
     corners = frustum.corners
     for i, corner in enumerate(corners):
         print(f'Corner {chr(65+i)} = ({corner.x:.9f}, {corner.y:.9f}, {corner.z:.9f}) | Length {corner.length}')
 
+def test_projection2(count: int = 1):
+    ctx = mgl.create_context(standalone=True)
+    ctx.enable(mgl.DEPTH_TEST)
+
+    gltf_file = f'{INPUT_DIR}mesh.glb'
+    mesh_data, texture_data = gltf_extract(gltf_file)
+
+    center, aabb = get_center(mesh_data.vertices)
+    # center.z = 1
+    # ortho_size = int_up(aabb.width), int_up(aabb.height)
+
+    camera = Camera(orthogonal=False, position=Vector3([center.x, center.y, 100.0]))
+    camera.look_at(center)
+    corners = camera._frustum.corners
+    for i, corner in enumerate(corners):
+        print(f'Corner {chr(65+i)} = ({corner.x:.9f}, {corner.y:.9f}, {corner.z:.9f})')
+
+    #camera.transform.position.z = 600
+
+    print(camera.transform.position)
+    camera.fit_to_points(aabb.corners, 0.0)
+    print(camera.transform.position)
+    renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
+
+    json_file = f'{INPUT_DIR}data\\poses.json'
+    shots = CtxShot.from_json(json_file, ctx, count=count)
+
+    file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
+    results = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=False, save_name_iter=file_name_iter)
+
+    res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
+    res_center_tup = int_up(res_center[0]), int_up(res_center[1])
+    for result in results:
+        crop, delta = crop_to_content(result, return_delta=True)
+        h, w = crop.shape[0:2]
+        c_d = Vector3([w / 2.0, h / 2.0, 0])
+        print(f'tl: {res_center + delta - c_d} | br: {res_center + delta + c_d}')
+
+        res_delta = (int_up(res_center[0] + delta[0]), int_up(res_center[1] + delta[1]))
+        cv2.line(result, res_center_tup, res_delta, (255, 0, 0), 5)
+        result = cv2.resize(result, None, None, 0.5, 0.5)
+        cv2.imshow('delta', result)
+        cv2.waitKey()
+        cv2.destroyAllWindows()
+
+    for shot in shots:
+        shot.release()
+
+    renderer.release()
+    ctx.release()
 
 def main() -> None:
     # test_projection(5)
 
-    test_frustum()
-
-    # for r1, r2 in list(product(rad_t, rad_t)):
-    #     print(f'[{r1:.3f}, {r2:.3f}, 0.000]: {Quaternion.from_eulers([r1, r2, 0.0]) * forward}')
-    #     print(f'[{r1:.3f}, 0.000, {r2:.3f}]: {Quaternion.from_eulers([r1, 0.0, r2]) * forward}')
-    #     print(f'[0.000, {r1:.3f}, {r2:.3f}]: {Quaternion.from_eulers([0.0, r1, r2]) * forward}')
+    test_projection2()
 
 
 if __name__ == '__main__':

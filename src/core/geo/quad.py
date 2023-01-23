@@ -4,6 +4,7 @@ from pyrr import Vector3
 
 from src.core.defs import EPSILON
 from src.core.geo.tetrahedron import Tetrahedron
+from src.core.utils import vector_mean
 
 
 @dataclass
@@ -29,3 +30,10 @@ class Quad:
         :return: Whether all points of the quad lie on the same plane
         """
         return abs(Tetrahedron(self.a, self.b, self.c, self.d).volume) < EPSILON
+
+    @property
+    def center(self) -> Vector3:
+        """
+        :return: The average of the corner points
+        """
+        return vector_mean((self.a, self.b, self.c, self.d))

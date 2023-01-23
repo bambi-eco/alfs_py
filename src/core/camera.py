@@ -1,10 +1,10 @@
 import copy
-from typing import Optional
+from typing import Optional, Collection
 
 from pyrr import Matrix44, Quaternion, Vector3
 
 from src.core.geo.frustum import Frustum
-from src.core.transform import Transform
+from src.core.geo.transform import Transform
 
 
 class Camera:
@@ -61,12 +61,12 @@ class Camera:
         return self._frustum.fovy
 
     @fovy.setter
-    def fovy(self, value) -> None:
+    def fovy(self, fovy: float) -> None:
         """
         Sets the fov in y direction of the camera
-        :param value: The new value
+        :param fovy: The new value
         """
-        self._frustum.fovy = value
+        self._frustum.fovy = fovy
 
     @property
     def fovx(self) -> float:
@@ -76,12 +76,12 @@ class Camera:
         return self._frustum.fovx
 
     @fovx.setter
-    def fovx(self, value) -> None:
+    def fovx(self, fovx: float) -> None:
         """
         Sets the perspective fov in x direction of the camera
-        :param value: The new value
+        :param fovx: The new value
         """
-        self._frustum.fovx = value
+        self._frustum.fovx = fovx
 
     @property
     def aspect_ratio(self) -> float:
@@ -91,59 +91,79 @@ class Camera:
         return self._frustum.aspect_ratio
 
     @aspect_ratio.setter
-    def aspect_ratio(self, value) -> None:
+    def aspect_ratio(self, aspect_ratio: float) -> None:
         """
         Sets the aspect ratio of the camera
-        :param value: The new value
+        :param aspect_ratio: The new value
         """
-        self._frustum.aspect_ratio = value
+        self._frustum.aspect_ratio = aspect_ratio
 
     @property
     def orthogonal(self) -> bool:
         """
-        :return: Whether the camera is orthogonal or not
+        :return: Whether the camera is orthogonal
         """
         return self._frustum.orthogonal
 
     @orthogonal.setter
-    def orthogonal(self, value) -> None:
-        self._frustum.orthogonal = value
+    def orthogonal(self, orthogonal: bool) -> None:
+        """
+        Sets the whether the camera is orthogonal
+        :param orthogonal: The new value
+        """
+        self._frustum.orthogonal = orthogonal
 
     @property
     def orthogonal_size(self) -> tuple[int, int]:
+        """
+        :return: The camera's orthogonal width and height
+        """
         return self._frustum.orthogonal_size
 
     @orthogonal_size.setter
-    def orthogonal_size(self, value) -> None:
-        self._frustum.orthogonal_size = value
+    def orthogonal_size(self, orthogonal_size: tuple[int, int]) -> None:
+        """
+        Sets the camera's orthogonal width and height
+        :param orthogonal_size: The new value
+        """
+        self._frustum.orthogonal_size = orthogonal_size
 
     @property
     def near(self) -> float:
+        """
+        :return: The camera's near clipping distance
+        """
         return self._frustum.near
 
     @near.setter
-    def near(self, value) -> None:
-        self._frustum.near = value
+    def near(self, near: float) -> None:
+        """
+        Sets the camera's near clipping distance
+        :param near: The new value
+        """
+        self._frustum.near = near
 
     @property
     def far(self) -> float:
+        """
+        :return: The camera's far clipping distance
+        """
         return self._frustum.far
 
     @far.setter
-    def far(self, value) -> None:
-        self._frustum.far = value
+    def far(self, far: float) -> None:
+        """
+        Sets the camera's far clipping distance
+        :param far: The new value
+        """
+        self._frustum.far = far
 
     @property
     def transform(self) -> Transform:
+        """
+        :return: The transform associated with the camera
+        """
         return self._frustum.transform
-
-
-    @property
-    def target(self) -> Vector3:
-        """
-        :return: The forward vector in world coordinates
-        """
-        return self.transform.position + self.transform.forward
 
     def get_proj(self, dtype: object = 'f4') -> Matrix44:
         """
@@ -171,8 +191,17 @@ class Camera:
 
     def look_at(self, target: Vector3, up: Optional[Vector3] = None) -> None:
         """
-        Changes the rotation of this camera so its forward vector points at the target
+        Changes the rotation of this camera so its forward vector points at the target.
         :param target: The target to point to
         :param up: The new up vector (optional)
         """
         self.transform.look_at(target, up)
+
+    def fit_to_points(self, points: Collection[Vector3], leeway: float) -> None:
+        """
+        Translates frustum along its viewing direction to capture all given points.
+        This process ignores near and far clipping settings and does not modify them.
+        :param points: A collection of points to capture
+        :param leeway: The maximum angle allowed between a point a side of the frustum expressed by its cosine value
+        """
+        self._frustum.fit_to_points(points, leeway)
