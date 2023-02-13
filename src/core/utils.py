@@ -1,6 +1,6 @@
 import base64
 from statistics import fmean
-from typing import Union, Optional, Iterable, Sequence, Any, Type, cast, Collection
+from typing import Union, Optional, Iterable, Sequence, Any, Collection
 from urllib.request import urlopen
 
 import cv2
@@ -220,6 +220,24 @@ def blend(images: Sequence[NDArray]) -> Optional[NDArray]:
 
     weight = 1.0 / img_count
     result = np.sum(images) * weight
+    return result
+
+def integral(images: Sequence[NDArray]) -> Optional[NDArray]:
+    """
+    Overlaps all given images and blends them together weighted by the amount of non-transparent color overlaps per pixel.
+    :param images: A sequence of images to blend together
+    :return: None if no images are passed or if the images have different resolutions; otherwise the blended image
+    """
+    img_count = len(images)
+    if img_count == 0:
+        return None
+    shape = images[0].shape
+    # if any([img for img in images if img.shape != shape]):
+    #     return None
+    stack = np.stack(images, axis=-1).sum(axis=-1)
+    overlaps = stack[:, :, -1]
+    overlaps[overlaps <= 1.0] = 1.0
+    result = np.divide(stack, overlaps[:, :, np.newaxis])
     return result
 
 

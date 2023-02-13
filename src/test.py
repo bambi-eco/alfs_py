@@ -3,6 +3,7 @@ from typing import Final
 import cv2
 import moderngl as mgl
 import numpy as np
+from PIL import Image
 from pyrr import Matrix44, Vector3
 
 from src.core.camera import Camera
@@ -15,7 +16,7 @@ from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
 from src.core.geo.transform import Transform
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
-    get_center, int_up, make_quad
+    get_center, int_up, make_quad, integral
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -112,7 +113,8 @@ def gltf_lib_test() -> None:
 
     vbo = ctx.buffer(reserve=5 * 4 * vertices.shape[0])
     ibo = ctx.buffer(indices.tobytes())
-    vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'v_in_v3_pos', 'v_in_v2_uv')], index_buffer=ibo, index_element_size=4)
+    vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'v_in_v3_pos', 'v_in_v2_uv')], index_buffer=ibo,
+                           index_element_size=4)
     # vao = ctx.vertex_array(prog, [(vetices, '3f4 2f4', 'pos_in', 'uv_cord_in')])
 
     x, y, z = split_components(vertices)
@@ -195,11 +197,11 @@ def test_crop_to_content():
     cv2.imwrite(f'{OUTPUT_DIR}crop.png', img)
 
 
-def test_projection(count: int = 1):
+def test_projection(count: int = 1, show_count: int = 0):
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
 
-    gltf_file = f'{INPUT_DIR}mesh.glb'
+    gltf_file = f'{INPUT_DIR}data\\haag\\dem_mesh_r2.glb'
     mesh_data, texture_data = gltf_extract(gltf_file)
 
     center, aabb = get_center(mesh_data.vertices)
@@ -209,26 +211,37 @@ def test_projection(count: int = 1):
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
-    json_file = f'{INPUT_DIR}data\\poses.json'
+    json_file = f'{INPUT_DIR}data\\haag\\poses.json'
     shots = CtxShot.from_json(json_file, ctx, count=count)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-    results = renderer.project_shots(shots, ProjectMode.SHOT_VIEW, save=False, save_name_iter=file_name_iter)
+    results = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=False, save_name_iter=file_name_iter)
 
-    res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
-    res_center_tup = int_up(res_center[0]), int_up(res_center[1])
-    for result in results:
-        crop, delta = crop_to_content(result, return_delta=True)
-        h, w = crop.shape[0:2]
-        c_d = Vector3([w / 2.0, h / 2.0, 0])
-        print(f'tl: {res_center + delta - c_d} | br: {res_center + delta + c_d}')
+    if show_count > 0:
+        # res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
+        # res_center_tup = int_up(res_center[0]), int_up(res_center[1])
+        for result in results[:show_count]:
+            # crop = crop_to_content(result)
+            # h, w = crop.shape[0:2]
+            # c_d = Vector3([w / 2.0, h / 2.0, 0])
+            # print(f'tl: {res_center + delta - c_d} | br: {res_center + delta + c_d}')
+            # res_delta = (int_up(res_center[0] + delta[0]), int_up(res_center[1] + delta[1]))
+            # cv2.line(result, res_center_tup, res_delta, (255, 0, 0), 5)
+            #crop = cv2.resize(crop, None, None, 2.0, 2.0)
+            im_pil = Image.fromarray(result)
+            im_pil.show()
+            # cv2.imshow('delta', crop)
+            # cv2.waitKey()
+            # cv2.destroyAllWindows()
 
-        res_delta = (int_up(res_center[0] + delta[0]), int_up(res_center[1] + delta[1]))
-        cv2.line(result, res_center_tup, res_delta, (255, 0, 0), 5)
-        result = cv2.resize(result, None, None, 0.5, 0.5)
-        cv2.imshow('delta', result)
-        cv2.waitKey()
-        cv2.destroyAllWindows()
+    result = integral(results)
+    # result = crop_to_content(result)
+    # result = cv2.resize(result, None, None, 0.5, 0.5)
+    im_pil = Image.fromarray(result)
+    im_pil.show()
+    # cv2.imshow('delta', result)
+    # cv2.waitKey()
+    # cv2.destroyAllWindows()
 
     for shot in shots:
         shot.release()
@@ -323,15 +336,8 @@ def test_deferred_shading() -> None:
 
     # TODO: fix second pass not rendering anything
 
-def test_frustum() -> None:
-    transform = Transform()
-    frustum = Frustum(70.0, 16.0/9.0, near=0.001, far=10, transform=transform)
 
-    corners = frustum.corners
-    for i, corner in enumerate(corners):
-        print(f'Corner {chr(65+i)} = ({corner.x:.9f}, {corner.y:.9f}, {corner.z:.9f}) | Length {corner.length}')
-
-def test_projection2(count: int = 1):
+def test_fit_to_points(count: int = 1):
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
 
@@ -346,16 +352,16 @@ def test_projection2(count: int = 1):
     camera.look_at(center)
     corners = camera._frustum.corners
     for i, corner in enumerate(corners):
-        print(f'Corner {chr(65+i)} = ({corner.x:.9f}, {corner.y:.9f}, {corner.z:.9f})')
+        print(f'Corner {chr(65 + i)} = ({corner.x:.9f}, {corner.y:.9f}, {corner.z:.9f})')
 
-    #camera.transform.position.z = 600
+    # camera.transform.position.z = 600
 
-    print(camera.transform.position)
-    camera.fit_to_points(aabb.corners, 0.0)
-    print(camera.transform.position)
+    # print(camera.transform.position)
+    # camera.fit_to_points(aabb.corners, 0.0)
+    # print(camera.transform.position)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
-    json_file = f'{INPUT_DIR}data\\poses.json'
+    json_file = f'{INPUT_DIR}data\\1\\poses.json'
     shots = CtxShot.from_json(json_file, ctx, count=count)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
@@ -382,10 +388,10 @@ def test_projection2(count: int = 1):
     renderer.release()
     ctx.release()
 
-def main() -> None:
-    # test_projection(5)
 
-    test_projection2()
+def main() -> None:
+    test_projection(40, 3)
+    # test_lines()
 
 
 if __name__ == '__main__':
