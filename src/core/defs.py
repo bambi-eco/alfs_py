@@ -14,8 +14,10 @@ EPSILON: Final[float] = sys.float_info.epsilon
 Number: Type = Union[int, float]
 Color: Type = Union[Number, tuple[Number, Number, Number], tuple[Number, Number, Number, Number]]
 
+
 class StrEnum(str, Enum):
     pass
+
 
 # DIRECTORIES
 ROOT_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.parent.absolute())}{PATH_SEP}'
@@ -38,7 +40,7 @@ DEF_PASS_FRAG_SHADER_PATH: Final[str] = f'{SHADERS_PATH}def_pass.frag.glsl'
 
 # COLORS
 BLACK: Final[tuple[float, float, float]] = (0.0, 0.0, 0.0)
-MAGENTA:  Final[tuple[float, float, float]] = (255.0, 255.0, 255.0)
+MAGENTA: Final[tuple[float, float, float]] = (255.0, 255.0, 255.0)
 TRANSPARENT: Final[tuple[float, float, float, float]] = (0.0, 0.0, 0.0, 0.0)
 
 # VECTORS

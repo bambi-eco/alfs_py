@@ -17,4 +17,4 @@ class Triangle:
         """
         :return: The normal spanned by a, b, and c
         """
-        return (self.b-self.a).cross(self.c-self.a).normalized
+        return (self.b - self.a).cross(self.c - self.a).normalized

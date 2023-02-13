@@ -178,6 +178,6 @@ class AABB:
         min_x, min_y, min_z = self.p_s
         max_x, max_y, max_z = self.p_e
         return Vector3([min_x, min_y, min_z]), Vector3([min_x, min_y, max_z]), \
-               Vector3([min_x, max_y, min_z]), Vector3([min_x, max_y, max_z]), \
-               Vector3([max_x, min_y, min_z]), Vector3([max_x, min_y, max_z]), \
-               Vector3([max_x, max_y, min_z]), Vector3([max_x, max_y, max_z])
+            Vector3([min_x, max_y, min_z]), Vector3([min_x, max_y, max_z]), \
+            Vector3([max_x, min_y, min_z]), Vector3([max_x, min_y, max_z]), \
+            Vector3([max_x, max_y, min_z]), Vector3([max_x, max_y, max_z])

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from pyrr import Vector3
 
+
 @dataclass
 class Tetrahedron:
     """

@@ -4,11 +4,13 @@ from typing import Final, Optional, Iterable, Union, Iterator
 import cv2
 from moderngl import Context, Program, Framebuffer
 from numpy.typing import NDArray
-from pyrr import Matrix44, Vector3
+from pyrr import Matrix44
 
 from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject
+from src.core.decorators import incomplete
 from src.core.defs import TRANSPARENT, BLACK, MAGENTA
+from src.core.geo.frustum import Frustum
 from src.core.shot import CtxShot
 from src.core.utils import img_from_fbo, overlay, crop_to_content, gen_checkerboard_tex, get_center, int_up
 
@@ -117,11 +119,15 @@ class Renderer:
 
         if mode is ProjectMode.COMPLETE_VIEW:
             background = self.render_ground()
-            def process_proj(proj: NDArray) -> NDArray: return overlay(background, proj)
+
+            def process_proj(proj: NDArray) -> NDArray:
+                return overlay(background, proj)
         elif mode is ProjectMode.SHOT_VIEW:
-            def process_proj(proj: NDArray) -> NDArray: return proj
+            def process_proj(proj: NDArray) -> NDArray:
+                return proj
         else:
-            def process_proj(proj: NDArray) -> NDArray: return crop_to_content(proj)
+            def process_proj(proj: NDArray) -> NDArray:
+                return crop_to_content(proj)
 
         for shot in shots:
             self._ctx.clear(*TRANSPARENT)
@@ -144,10 +150,14 @@ class Renderer:
 
         if save:
             results = None
-            def handle_result(res: NDArray) -> NDArray: return cv2.imwrite(next(save_name_iter), res)
+
+            def handle_result(res: NDArray) -> NDArray:
+                return cv2.imwrite(next(save_name_iter), res)
         else:
             results = []
-            def handle_result(res: NDArray) -> None: results.append(res)
+
+            def handle_result(res: NDArray) -> None:
+                results.append(res)
 
         for result in self.project_shots_iter(shots, mode):
             handle_result(result)
@@ -158,8 +168,8 @@ class Renderer:
 
     _PAR_POS: Final[str] = 'v_in_v3_pos'
     _PAR_UV: Final[str] = 'v_in_v2_uv'
-    _PAR_PROJ: Final[str] =  'u_m4_proj'
-    _PAR_VIEW: Final[str] =  'u_m4_view'
+    _PAR_PROJ: Final[str] = 'u_m4_proj'
+    _PAR_VIEW: Final[str] = 'u_m4_view'
     _PAR_MODEL: Final[str] = 'u_m4_model'
     _PAR_TEX: Final[str] = 'u_s2_tex'
     _PAR_SHOT_PROJ: Final[str] = 'u_m4_shot_proj'
@@ -239,7 +249,10 @@ class Renderer:
 
     # endregion
 
+
 class CenteredRenderer(Renderer):
+
+    @incomplete(f'Class depends on {Frustum.fit_to_points.__name__} which is incomplete')
     def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
                  texture: Optional[TextureData] = None):
         """
@@ -262,15 +275,12 @@ class CenteredRenderer(Renderer):
             camera_dir = (camera.transform.position - center).normalized
             corner_dist = (aabb.p_s - center).length
 
-
             if camera.aspect_ratio <= 1.0:
                 # fit cameras distance based on the fovy
                 pass
             else:
                 # fit cameras distance based on the fovx
                 fovx = camera.fovy * camera.aspect_ratio
-
-
 
             camera = Camera()
 

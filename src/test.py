@@ -10,11 +10,9 @@ from src.core.camera import Camera
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
     TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
-from src.core.geo.frustum import Frustum
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
-from src.core.geo.transform import Transform
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
     get_center, int_up, make_quad, integral
 
@@ -201,7 +199,10 @@ def test_projection(count: int = 1, show_count: int = 0):
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
 
-    gltf_file = f'{INPUT_DIR}data\\haag\\dem_mesh_r2.glb'
+    data_dir = f'{INPUT_DIR}data\\haag\\'
+    gltf_file = f'{data_dir}dem_mesh_r2.glb'
+    json_file = f'{data_dir}poses.json'
+
     mesh_data, texture_data = gltf_extract(gltf_file)
 
     center, aabb = get_center(mesh_data.vertices)
@@ -211,7 +212,6 @@ def test_projection(count: int = 1, show_count: int = 0):
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
-    json_file = f'{INPUT_DIR}data\\haag\\poses.json'
     shots = CtxShot.from_json(json_file, ctx, count=count)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
@@ -227,8 +227,9 @@ def test_projection(count: int = 1, show_count: int = 0):
             # print(f'tl: {res_center + delta - c_d} | br: {res_center + delta + c_d}')
             # res_delta = (int_up(res_center[0] + delta[0]), int_up(res_center[1] + delta[1]))
             # cv2.line(result, res_center_tup, res_delta, (255, 0, 0), 5)
-            #crop = cv2.resize(crop, None, None, 2.0, 2.0)
-            im_pil = Image.fromarray(result)
+            # crop = cv2.resize(crop, None, None, 2.0, 2.0)
+            img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+            im_pil = Image.fromarray(img)
             im_pil.show()
             # cv2.imshow('delta', crop)
             # cv2.waitKey()
@@ -237,7 +238,8 @@ def test_projection(count: int = 1, show_count: int = 0):
     result = integral(results)
     # result = crop_to_content(result)
     # result = cv2.resize(result, None, None, 0.5, 0.5)
-    im_pil = Image.fromarray(result)
+    img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+    im_pil = Image.fromarray(img)
     im_pil.show()
     # cv2.imshow('delta', result)
     # cv2.waitKey()
@@ -390,8 +392,7 @@ def test_fit_to_points(count: int = 1):
 
 
 def main() -> None:
-    test_projection(40, 3)
-    # test_lines()
+    test_projection(10, 0)
 
 
 if __name__ == '__main__':

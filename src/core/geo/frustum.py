@@ -3,9 +3,11 @@ from typing import Optional, Collection, Final
 from numpy import deg2rad, sign, arctan, arccos, tan
 from pyrr import Vector3, Quaternion, Matrix44, Vector4
 
+from src.core.decorators import incomplete
 from src.core.defs import FORWARD, RIGHT, UP, StrEnum
 from src.core.geo.quad import Quad
 from src.core.geo.transform import Transform
+
 
 class Side(StrEnum):
     TOP: Final[str] = 'top'
@@ -14,6 +16,7 @@ class Side(StrEnum):
     LEFT: Final[str] = 'left'
     NEAR: Final[str] = 'near'
     FAR: Final[str] = 'far'
+
 
 class Frustum:
     """
@@ -91,7 +94,8 @@ class Frustum:
     def corners(self) -> tuple[Vector3, Vector3, Vector3, Vector3, Vector3, Vector3, Vector3, Vector3]:
         """
         :return: The corners of the frustum defined by the near and far clipping distance.
-        Points are ordered from near to far, bottom to top, and left to right (i.e., NBL, NTL, NBR, NTR, FBL, FTL, FBR, FTR)
+        Points are ordered from near to far, bottom to top, and left to right
+        (i.e., NBL, NTL, NBR, NTR, FBL, FTL, FBR, FTR)
         """
         return self.corners_at(self.near) + self.corners_at(self.far)
 
@@ -103,25 +107,26 @@ class Frustum:
         """
         return {key: corner for key, corner in zip(Frustum._FULL_CORNER_NAMES, self.corners)}
 
-
     def corners_at(self, depth: float) -> tuple[Vector3, Vector3, Vector3, Vector3]:
         """
         Computes the corners of the frustums slice at the given depth.
         :param depth: The depth the frustum should be sliced at
-        :return: A tuple containing the corner points going from bottom to top and from left to right (i.e., BL, TL, BR, TR)
+        :return: A tuple containing the corner points going from bottom to top and from left to right
+        (i.e., BL, TL, BR, TR)
         """
         x_rad = deg2rad(self.fovx / 2.0)
         y_rad = deg2rad(self.fovy / 2.0)
-        l = Quaternion.from_eulers([0.0, x_rad, 0.0]) * FORWARD  # center of the left side
-        t = Quaternion.from_eulers([y_rad, 0.0, 0.0]) * FORWARD  # center of the top side
-        direction = Vector3([l.x + t.x, l.y + t.y, l.z]).normalized  # take depth in forward direction only once
+        c_left = Quaternion.from_eulers([0.0, x_rad, 0.0]) * FORWARD  # center of the left side
+        c_top = Quaternion.from_eulers([y_rad, 0.0, 0.0]) * FORWARD  # center of the top side
+        # take depth in forward direction only once
+        direction = Vector3([c_left.x + c_top.x, c_left.y + c_top.y, c_left.z]).normalized
         ref = direction * depth  # top left corner
         mat = self.transform.mat  # translation, rotation, and scale
 
         return mat * Vector3([-ref.x, -ref.y, ref.z]), \
-               mat * Vector3([-ref.x,  ref.y, ref.z]), \
-               mat * Vector3([ ref.x, -ref.y, ref.z]), \
-               mat * ref
+            mat * Vector3([-ref.x, ref.y, ref.z]), \
+            mat * Vector3([ref.x, -ref.y, ref.z]), \
+            mat * ref
 
     def corners_at_dict(self, depth: float) -> dict[str, Vector3]:
         """
@@ -196,6 +201,7 @@ class Frustum:
         # GLSL clipping rule
         return abs(pp.x) <= pp.w and abs(pp.y) <= pp.w and abs(pp.z) <= pp.w
 
+    @incomplete('Function contains calculation errors')
     def fit_to_points(self, points: Collection[Vector3], leeway: float) -> None:
         """
         Translates frustum along its viewing direction to capture all given points.
@@ -224,7 +230,7 @@ class Frustum:
             # project point onto relative plane of the frustums up and right vector to remove depth
             t_point = self.transform.mat.inverse * point
             t_proj_r = t_point * RIGHT  # vector_project(t_point, RIGHT)
-            t_proj_u = t_point * UP     # vector_project(t_point, UP)
+            t_proj_u = t_point * UP  # vector_project(t_point, UP)
             t_proj = t_proj_r + t_proj_u
 
             # find angle between local up and projection
@@ -258,8 +264,7 @@ class Frustum:
                 min_t_proj_r = t_proj_r
                 min_t_proj_u = t_proj_u
 
-
-        if min_angle < 0.0 or min_angle > leeway: # if the point lies outside the frustum or too far away from the frustum's sides
+        if min_angle < 0.0 or min_angle > leeway:  # if the point lies outside the frustum or too far away from the frustum's sides
             # get the sign of the delta by feeding the angle between forward and point to the sign function
             # forward = self.transform.forward
             # angle = forward.dot(min_point) / min_t_point.length

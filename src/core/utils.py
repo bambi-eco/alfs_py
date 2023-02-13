@@ -1,4 +1,5 @@
 import base64
+import numbers
 from statistics import fmean
 from typing import Union, Optional, Iterable, Sequence, Any, Collection
 from urllib.request import urlopen
@@ -17,7 +18,7 @@ from src.core.defs import Color
 
 def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[Any] = None) -> Any:
     """
-    Returns the value within a dict associated with the first valid key of a iterable key source
+    Returns the value within a dict associated with the first valid key of an iterable key source
     :param in_dict: The dictionary to search within
     :param keys: An iterable source of keys
     :param default: The value to be returned when no valid key was passed (optional)
@@ -222,23 +223,35 @@ def blend(images: Sequence[NDArray]) -> Optional[NDArray]:
     result = np.sum(images) * weight
     return result
 
-def integral(images: Sequence[NDArray]) -> Optional[NDArray]:
+
+def integral(images: Sequence[NDArray], dtype=None) -> Optional[NDArray]:
     """
-    Overlaps all given images and blends them together weighted by the amount of non-transparent color overlaps per pixel.
+    Overlaps all given images and blends them together weighted by the amount of non-transparent overlaps per pixel.
     :param images: A sequence of images to blend together
+    :param dtype:
     :return: None if no images are passed or if the images have different resolutions; otherwise the blended image
     """
     img_count = len(images)
     if img_count == 0:
         return None
     shape = images[0].shape
-    # if any([img for img in images if img.shape != shape]):
-    #     return None
+
+    if any([True for img in images if img.shape != shape]):
+        return None
+
+    if dtype is None:
+        dtype = images[0].dtype
+
     stack = np.stack(images, axis=-1).sum(axis=-1)
     overlaps = stack[:, :, -1]
     overlaps[overlaps <= 1.0] = 1.0
     result = np.divide(stack, overlaps[:, :, np.newaxis])
-    return result
+
+    # if dtype is any integer, assume color values are between 0 and 255
+    if issubclass(np.dtype(dtype).type, numbers.Integral):
+        result *= 255
+
+    return result.astype(dtype)
 
 
 def _get_from_buffer(idx: int, gltf: GLTF, comp: int, dtype: str = 'f4') -> NDArray:
@@ -358,8 +371,8 @@ def make_quad() -> MeshData:
     """
     :return: Mesh data representing a quad covering the entire screen in a deferred shading scenario
     """
-    vertices = np.array([[-1.0,  1.0, 0.0], [-1.0, -1.0, 0.0],
-                         [1.0, -1.0, 0.0], [1.0,  1.0, 0.0]])
+    vertices = np.array([[-1.0, 1.0, 0.0], [-1.0, -1.0, 0.0],
+                         [1.0, -1.0, 0.0], [1.0, 1.0, 0.0]])
 
     uvs = np.array([[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
     indices = np.array([0, 1, 2, 1, 2, 3])
@@ -435,14 +448,16 @@ def gen_checkerboard_tex(tile_per_side: int, tile_size: int, tile_color: Color, 
 
     return result
 
-def vector_project(a: Vector3, b:Vector3) -> Vector3:
+
+def vector_project(a: Vector3, b: Vector3) -> Vector3:
     """
-    Projects the vector a onto the vector b
+    Projects the vector ``a`` onto the vector b
     :param a: The vector to be projected
     :param b: The vector to be projected onto
     :return: A new vector representing the portion of the vector a pointing in the direction of vector b
     """
-    return (a.dot(b)/b.dot(b)) * b
+    return (a.dot(b) / b.dot(b)) * b
+
 
 def vector_mean(vectors: Collection[Vector3]) -> Vector3:
     """
@@ -460,14 +475,15 @@ def vector_mean(vectors: Collection[Vector3]) -> Vector3:
 
     return Vector3((fmean(x_vals), fmean(y_vals), fmean(z_vals)))
 
+
 def vector_to_geogebra(vec: Vector3, vec_name: Optional[str] = None, decimals: int = 3) -> str:
     """
     Turns a vector into a GeoGebra point definition
     :param vec: The vector to transform
+    :param vec_name: Name to be assigned to the vector in GeoGebra
     :param decimals: The amount of decimals each coordinate should be rounded to (defaults to 3)
     :return: A string that defines a point in GeoGebra
     """
     definition = f'({round(vec.x, decimals)}, {round(vec.y, decimals)}, {round(vec.z, decimals)})'
     assignment = '' if vec_name is None else f'{vec_name} = '
     return assignment + definition
-

@@ -26,7 +26,8 @@ class Transform:
         self._scale = Vector3(scale) if scale is not None else Vector3([1.0, 1.0, 1.0])
 
     @staticmethod
-    def from_up_forward(up: Vector3, forward: Vector3, position: Optional[Vector3] = None, scale: Optional[Vector3] = None):
+    def from_up_forward(up: Vector3, forward: Vector3, position: Optional[Vector3] = None,
+                        scale: Optional[Vector3] = None):
         """
         Creates a ``Transform`` object based on the rotation defined by an up and forward vector
         :param up: The up vector of the transform
