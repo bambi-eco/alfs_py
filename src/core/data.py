@@ -35,11 +35,12 @@ class TextureData:
 
     def to_bytes(self) -> bytes:
         """
-        Returns a byte representation of the held texture in RGB or RGBA
+        Returns a byte representation of the held texture. Ensures percentage channel values
         :return: Bytes representing the texture
         """
-        code = cv2.COLOR_BGR2RGB if self.texture.shape[2] <= 3 else cv2.COLOR_BGRA2RGBA
-        img = cv2.cvtColor(self.texture, code) / 255.0
+        img = self.texture
+        if img.max(initial=0.0) > 1.0:
+            img = self.texture / 255.0
         return img.astype('f4').tobytes()
 
     def tex_gen_input(self) -> tuple[tuple[int, int], int, bytes]:

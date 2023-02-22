@@ -195,7 +195,7 @@ def test_crop_to_content():
     cv2.imwrite(f'{OUTPUT_DIR}crop.png', img)
 
 
-def test_projection(count: int = 1, show_count: int = 0):
+def test_projection(count: int = 1, show_count: int = 0, projection_mode: ProjectMode = ProjectMode.COMPLETE_VIEW):
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
 
@@ -215,7 +215,7 @@ def test_projection(count: int = 1, show_count: int = 0):
     shots = CtxShot.from_json(json_file, ctx, count=count)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-    results = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=False, save_name_iter=file_name_iter)
+    results = renderer.project_shots(shots, projection_mode, save=False, save_name_iter=file_name_iter)
 
     if show_count > 0:
         # res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
@@ -392,7 +392,7 @@ def test_fit_to_points(count: int = 1):
 
 
 def main() -> None:
-    test_projection(10, 0)
+    test_projection(25, 0, ProjectMode.SHOT_VIEW_RELATIVE)
 
 
 if __name__ == '__main__':

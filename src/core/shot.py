@@ -1,3 +1,4 @@
+import copy
 import json
 import pathlib
 from typing import Union, Final, Optional
@@ -11,6 +12,7 @@ from pyrr import Vector3, Quaternion, Matrix44
 from src.core.camera import Camera
 from src.core.data import TextureData
 from src.core.defs import PATH_SEP
+from src.core.geo.transform import Transform
 from src.core.utils import get_first_valid
 
 
@@ -19,11 +21,11 @@ class Shot:
     Represents the combination of a camera and a picture taken by that camera
     """
     camera: Final[Camera]
-    # TODO: Add model matrix for corrections
+    correction: Transform
     _tex_data: TextureData
 
     def __init__(self, img: Union[str, NDArray], position: Vector3, rotation: Quaternion, fovy: float = 60.0,
-                 aspect_ratio: float = 1):
+                 aspect_ratio: float = 1, correction: Optional[Transform] = None):
         """
         Initializes a new ``Shot`` object
         :param img: Either the path to an image file as a string, or an already loaded image as an RGB numpy array
@@ -34,6 +36,11 @@ class Shot:
         """
         self._released = False
         self.camera = Camera(fovy, aspect_ratio, position=position, rotation=rotation)
+        if correction is None:
+            self.correction = Transform(dtype='f4')
+        else:
+            self.correction = copy.deepcopy(correction)
+
         if isinstance(img, np.ndarray):
             self._tex_data = TextureData(img.copy())
         else:
@@ -48,9 +55,18 @@ class Shot:
 
     @staticmethod
     def _load_image(texture_filename) -> NDArray:
-        img = cv2.imread(texture_filename)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # convert to RGB, opencv uses BGR
+        img = cv2.imread(texture_filename, cv2.IMREAD_UNCHANGED)
+        channel_count = 1 if len(img.shape) == 2 else img.shape[2]
+
+        # convert to and guarantee RGBA
+        if channel_count == 1:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGBA)
+        elif channel_count == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
         img = np.flip(img, 0).copy(order="C")  # flip image vertically
+        img = img.astype('f4')
         return img
 
     def get_proj(self) -> Matrix44:
@@ -65,11 +81,17 @@ class Shot:
         """
         return self.camera.get_view(dtype='f4')
 
+    def get_correction(self) -> Matrix44:
+        """
+        :return: A matrix representing the correction to be applied to this shot
+        """
+        return self.correction.mat
+
     def get_mat(self) -> Matrix44:
         """
-        :return: A matrix representing the combination of projection and view of this shots camera
+        :return: A matrix representing the combination of projection, view, and correction of this shot
         """
-        return self.camera.get_mat(dtype='f4')
+        return self.camera.get_mat(dtype='f4') * self.get_correction()
 
 
 class CtxShot(Shot):

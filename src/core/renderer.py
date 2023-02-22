@@ -1,24 +1,28 @@
+from collections import defaultdict
+from copy import deepcopy
 from enum import Enum
-from typing import Final, Optional, Iterable, Union, Iterator
+from functools import cached_property
+from typing import Final, Optional, Iterable, Union, Iterator, Callable
 
 import cv2
+from PIL import Image
 from moderngl import Context, Program, Framebuffer
 from numpy.typing import NDArray
 from pyrr import Matrix44
 
 from src.core.camera import Camera
-from src.core.data import MeshData, TextureData, RenderObject
+from src.core.data import MeshData, TextureData, RenderObject, AABB
 from src.core.decorators import incomplete
 from src.core.defs import TRANSPARENT, BLACK, MAGENTA
 from src.core.geo.frustum import Frustum
 from src.core.shot import CtxShot
-from src.core.utils import img_from_fbo, overlay, crop_to_content, gen_checkerboard_tex, get_center, int_up
+from src.core.utils import img_from_fbo, overlay, crop_to_content, gen_checkerboard_tex, get_center, int_up, get_aabb
 
 
 class ProjectMode(Enum):
     COMPLETE_VIEW = 0,
-    SHOT_VIEW = 1,
-    SHOT_VIEW_CROPPED = 2,
+    SHOT_VIEW_RELATIVE = 1,
+    SHOT_VIEW_EXCLUSIVE = 2,
 
 
 class Renderer:
@@ -29,6 +33,7 @@ class Renderer:
     _obj_prog: Final[Program]
     _obj: RenderObject
     _shot_prog: Final[Program]
+    mesh_aabb: Final[AABB]
     camera: Camera
 
     def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
@@ -54,6 +59,7 @@ class Renderer:
 
         self._obj_prog = ctx.program(vertex_shader=self._OBJ_VERT_SHADER, fragment_shader=self._OBJ_FRAG_SHADER)
         self._obj = RenderObject.from_mesh(self._obj_prog, mesh, texture, self._PAR_POS, self._PAR_UV)
+        self.mesh_aabb = get_aabb(mesh.vertices)
 
         self._shot_prog = ctx.program(vertex_shader=self._SHOT_VERT_SHADER, fragment_shader=self._SHOT_FRAG_SHADER)
         self._shot = self._get_shot_render_object()
@@ -106,6 +112,55 @@ class Renderer:
         shot.tex_use()
         self._shot_prog[self._PAR_SHOT_PROJ].write(shot.get_proj())
         self._shot_prog[self._PAR_SHOT_VIEW].write(shot.get_view())
+        self._shot_prog[self._PAR_SHOT_CORRECTION].write(shot.get_correction())
+
+    def _project_shot(self, shot: CtxShot) -> NDArray:
+        self._ctx.clear(*TRANSPARENT)
+        self._use_shot(shot)
+        self._shot.render()
+        result = img_from_fbo(self._fbo)
+        return result
+
+    def _psi_complete_view(self, shots: Iterable[CtxShot]) -> Iterator[NDArray]:
+        background = self.render_ground()
+        for shot in shots:
+            result = self._project_shot(shot)
+            yield overlay(background, result)
+
+    def _psi_shot_view_relative(self, shots: Iterable[CtxShot]) -> Iterator[NDArray]:
+        for shot in shots:
+            yield self._project_shot(shot)
+
+    @incomplete('Method for projecting points not finished yet')
+    def _psi_shot_view_exclusive(self, shots: Iterable[CtxShot]) -> Iterator[NDArray]:
+        camera_cache = deepcopy(self.camera)
+        for shot in shots:
+            # compute projected points
+
+            # compute camera to capture all points
+
+            camera = Camera()
+
+            # apply camera
+            self.camera = camera
+            self.apply_camera()
+
+            # project shot
+            yield self._project_shot(shot)
+
+        # reset camera
+        self.camera = camera_cache
+
+    @cached_property
+    def _psi_look_up(self) -> dict[ProjectMode, Callable[[Iterable[CtxShot]], Iterator[NDArray]]]:
+        # Maybe make this static somehow
+        def default(_):
+            raise NotImplementedError(f'Renderer is using invalid projection mode')
+        result = defaultdict(default)
+        result[ProjectMode.COMPLETE_VIEW] = self._psi_complete_view
+        result[ProjectMode.SHOT_VIEW_RELATIVE] = self._psi_shot_view_relative
+        result[ProjectMode.SHOT_VIEW_EXCLUSIVE] = self._psi_shot_view_exclusive
+        return result
 
     def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode) -> Iterator[NDArray]:
         """
@@ -117,24 +172,7 @@ class Renderer:
         if not isinstance(shots, Iterable):
             shots = [shots]
 
-        if mode is ProjectMode.COMPLETE_VIEW:
-            background = self.render_ground()
-
-            def process_proj(proj: NDArray) -> NDArray:
-                return overlay(background, proj)
-        elif mode is ProjectMode.SHOT_VIEW:
-            def process_proj(proj: NDArray) -> NDArray:
-                return proj
-        else:
-            def process_proj(proj: NDArray) -> NDArray:
-                return crop_to_content(proj)
-
-        for shot in shots:
-            self._ctx.clear(*TRANSPARENT)
-            self._use_shot(shot)
-            self._shot.render()
-            result = process_proj(img_from_fbo(self._fbo))
-            yield result
+        return self._psi_look_up[mode](shots)
 
     def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
                       save: bool = False, save_name_iter: Optional[Iterator[str]] = None) -> Optional[list[NDArray]]:
@@ -173,7 +211,8 @@ class Renderer:
     _PAR_MODEL: Final[str] = 'u_m4_model'
     _PAR_TEX: Final[str] = 'u_s2_tex'
     _PAR_SHOT_PROJ: Final[str] = 'u_m4_shot_proj'
-    _PAR_SHOT_VIEW: Final[str] = 'u_m4_shot_cam'
+    _PAR_SHOT_VIEW: Final[str] = 'u_m4_shot_view'
+    _PAR_SHOT_CORRECTION: Final[str] = 'u_m4_shot_correction'
 
     _OBJ_VERT_SHADER: Final[str] = f"""
     #version 330
@@ -215,6 +254,7 @@ class Renderer:
     // view and camera/projection matrix for one shot:
     uniform mat4 {_PAR_SHOT_PROJ};
     uniform mat4 {_PAR_SHOT_VIEW};
+    uniform mat4 {_PAR_SHOT_CORRECTION};
 
     layout (location = 0) in vec3 {_PAR_POS};
     out vec4 v_out_v4_shot_uv;
@@ -222,7 +262,8 @@ class Renderer:
     void main() {{
         vec4 world_pos = {_PAR_MODEL} * vec4({_PAR_POS}.xyz, 1.0);
         gl_Position = {_PAR_PROJ} * {_PAR_VIEW} *  world_pos;
-        v_out_v4_shot_uv = {_PAR_SHOT_PROJ} * {_PAR_SHOT_VIEW} * world_pos;
+        v_out_v4_shot_uv = {_PAR_SHOT_PROJ} * {_PAR_SHOT_VIEW} * {_PAR_SHOT_CORRECTION} * world_pos;
+        // * {_PAR_SHOT_CORRECTION};
     }}
     """
 
@@ -242,7 +283,7 @@ class Renderer:
             discard; // throw away the fragment 
             f_out_v4_color = vec4(0.0, 0.0, 0.0, 0.0);
         }} else {{
-            f_out_v4_color = vec4(texture({_PAR_TEX}, uv.xy).rgb, 1.0);
+            f_out_v4_color = vec4(texture({_PAR_TEX}, uv.xy).rgba);
         }}
     }}
     """

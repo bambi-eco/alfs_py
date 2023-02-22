@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Any
 
 from pyrr import Quaternion, Vector3, Matrix44
 
@@ -14,26 +14,28 @@ class Transform:
     _scale: Vector3
 
     def __init__(self, position: Optional[Vector3] = None, rotation: Optional[Quaternion] = None,
-                 scale: Optional[Vector3] = None):
+                 scale: Optional[Vector3] = None, dtype: Any ='f4'):
         """
         Class representing a position, rotation, and scale of geometry in 3D space
         :param position: The position in 3D space (optional)
         :param rotation: The rotation in 3D space (optional)
         :param scale: The scale along each axis (optional)
+        :param dtype: The dtype to be used for floating point values (defaults to f4)
         """
-        self._position = Vector3(position) if position is not None else Vector3([0.0, 0.0, 0.0])
-        self._rotation = Quaternion(rotation) if rotation is not None else Quaternion([0.0, 0.0, 0.0, 1.0])
-        self._scale = Vector3(scale) if scale is not None else Vector3([1.0, 1.0, 1.0])
+        self._position = Vector3(position) if position is not None else Vector3([0.0, 0.0, 0.0], dtype=dtype)
+        self._rotation = Quaternion(rotation) if rotation is not None else Quaternion([0.0, 0.0, 0.0, 1.0], dtype=dtype)
+        self._scale = Vector3(scale) if scale is not None else Vector3([1.0, 1.0, 1.0], dtype=dtype)
 
     @staticmethod
     def from_up_forward(up: Vector3, forward: Vector3, position: Optional[Vector3] = None,
-                        scale: Optional[Vector3] = None):
+                        scale: Optional[Vector3] = None, dtype: Any = 'f4'):
         """
         Creates a ``Transform`` object based on the rotation defined by an up and forward vector
         :param up: The up vector of the transform
         :param forward: The forward vector of the transform
         :param position: The position in 3D space (optional)
         :param scale: The scale along each axis (optional)
+        :param dtype: The dtype to be used for floating point values (defaults to f4)
         :return: A ``Transform`` instance initialized respectively
         """
         if up.dot(forward) > 0.000125:
@@ -41,35 +43,48 @@ class Transform:
 
         target = position + forward.normalized
         rotation = Quaternion.from_matrix(Matrix44.look_at(position, target, up.normalized))
-        return Transform(position, rotation, scale)
+        return Transform(position, rotation, scale, dtype)
 
     @property
-    def trans_mat(self) -> Matrix44:
+    def trans_mat(self, dtype: Any = None) -> Matrix44:
         """
+        :param dtype: The data type to be used for the matrix (optional)
         :return: A matrix representing the translation of the transform
         """
-        return Matrix44.from_translation(self._position)
+        if dtype is None:
+            dtype = self._position.dtype
+        return Matrix44.from_translation(self._position, dtype=dtype)
 
     @property
-    def rot_mat(self) -> Matrix44:
+    def rot_mat(self, dtype: Any = None) -> Matrix44:
         """
+        :param dtype: The data type to be used for the matrix (optional)
         :return: A matrix representing the rotation of the transform
         """
-        return Matrix44.from_quaternion(self._rotation)
+        if dtype is None:
+            dtype = self._rotation.dtype
+        return Matrix44.from_quaternion(self._rotation, dtype=dtype)
 
     @property
-    def scale_mat(self) -> Matrix44:
+    def scale_mat(self, dtype: Any = None) -> Matrix44:
         """
+        :param dtype: The data type to be used for the matrix (optional)
         :return: A matrix representing the scale of the transform
         """
-        return Matrix44.from_scale(self._scale)
+        if dtype is None:
+            dtype = self._scale.dtype
+        return Matrix44.from_scale(self._scale, dtype=dtype)
 
     @property
-    def mat(self) -> Matrix44:
+    def mat(self, dtype: Any = None) -> Matrix44:
         """
+        :param dtype: The data type to be used for the matrix (optional)
         :return: A matrix representing the entire transform
         """
-        return self.trans_mat * self.rot_mat * self.scale_mat
+        if dtype is None:
+            return self.trans_mat * self.rot_mat * self.scale_mat
+        else:
+            return (self.trans_mat * self.rot_mat * self.scale_mat).astype(dtype)
 
     @property
     def up(self) -> Vector3:
@@ -133,7 +148,7 @@ class Transform:
         Sets the position held by this transform
         :param position: The new position
         """
-        self._position = Vector3(position)
+        self._position = Vector3(position, dtype=self._position.dtype)
 
     @property
     def rotation(self) -> Quaternion:
@@ -148,7 +163,7 @@ class Transform:
         Sets the rotation held by this transform
         :param rotation: The new rotation
         """
-        self._rotation = Quaternion(rotation)
+        self._rotation = Quaternion(rotation, dtype=self._rotation.dtype)
 
     @property
     def scale(self) -> Vector3:
@@ -163,7 +178,7 @@ class Transform:
         Sets the scale held by this transform
         :param scale: The new scale
         """
-        self._scale = Vector3(scale)
+        self._scale = Vector3(scale, dtype=self._scale.dtype)
 
     def look_at(self, target: Vector3, up: Optional[Vector3] = None) -> None:
         """

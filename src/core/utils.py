@@ -35,7 +35,7 @@ def img_from_fbo(fbo: Framebuffer, attachment: int = 0) -> NDArray[np.uint8]:
     Reads image data from the FBO and turns it into an OpenCV representation (BGRA)
     :param fbo: The frame buffer to read image data from
     :param attachment: Number of the color attachment to read from
-    :return: A numpy array containing the image
+    :return: A numpy array containing the image in the BGRA format
     """
     raw = fbo.read(components=4, attachment=attachment, dtype='f1')
     img = np.frombuffer(raw, dtype=np.uint8).reshape((*fbo.size[1::-1], 4))
@@ -60,6 +60,7 @@ def bytes_to_img(data: Union[bytes, str]) -> NDArray[np.number]:
     """
     data_arr = np.frombuffer(data, dtype=np.uint8)
     img = cv2.imdecode(data_arr, flags=cv2.IMREAD_COLOR)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return img
 
 
@@ -96,25 +97,18 @@ def overlay(img_a: NDArray, img_b: NDArray) -> Optional[NDArray]:
     Tries to overlay an image onto another
     :param img_a: The image serving as background
     :param img_b: The image serving as foreground
-    :return: If the images do not share the same shape ``None``; otherwise the generated image
+    :return: If the images do not share the same shape or dtype ``None``; otherwise the generated image
     """
-    if img_a.shape != img_b.shape:  # Images are not compatible
+    if img_a.shape != img_b.shape or img_a.dtype != img_b.dtype:  # Images are not compatible
         return None
     if len(img_a.shape) < 3 or img_a.shape[2] < 4:  # images have no alpha channel, overlay would just show img_b
         return img_b.copy()
 
-    result = img_a.copy()
-    over = img_b.copy()
-
-    alpha = img_b[..., 3]
-    fact = (255.0 - alpha) / 255.0
-
-    # scale all layers accept alpha according to the overlays alpha values
-    for i in range(0, result.shape[-1] - 1):
-        result[..., i] = (result[..., i] * fact).astype(img_a.dtype)
-        over[..., i] = (over[..., i] * alpha).astype(img_b.dtype)
-    result += over
-    return result
+    dtype = img_a.dtype
+    overlay_strength = np.resize(img_b[..., 3], (img_b.shape[0], img_b.shape[1], 1)) / 1.0
+    if not isinstance(dtype, np.floating):
+        overlay_strength /= 255.0
+    return ((img_b * overlay_strength) + (img_a * (1.0 - overlay_strength))).astype(dtype)
 
 
 def _get_border_size(border: tuple[int, int, int, int], width: int, height: int) -> int:
@@ -320,7 +314,6 @@ def gltf_to_texture_data(gltf: GLTF) -> Optional[TextureData]:
     with urlopen(uri) as resp:
         data = resp.read()
     texture = bytes_to_img(data)
-
     return TextureData(texture) if texture is not None else None
 
 
@@ -334,22 +327,34 @@ def gltf_extract(file: str) -> tuple[MeshData, TextureData]:
     return gltf_to_mesh_data(gltf_file), gltf_to_texture_data(gltf_file)
 
 
+def get_aabb(vertices: NDArray) -> AABB:
+    """
+    Determines the smallest convex AABB for the given vertices
+    :param vertices: The vertices
+    :return: An AABB
+    """
+    max_x, max_y, max_z = np.max(vertices, axis=0)
+    min_x, min_y, min_z = np.min(vertices, axis=0)
+    max_p = Vector3((max_x, max_y, max_z))
+    min_p = Vector3((min_x, min_y, min_z))
+    return AABB(min_p, max_p)
+
+
 def get_center(vertices: NDArray) -> tuple[Vector3, AABB]:
     """
     Computes the center position and AABB of a set of vertices
     :param vertices: A numpy array containing vertices
     :return: A tuple containing the center of the vertices and the two points defining the vertices AABB
     """
-    max_x, max_y, max_z = np.max(vertices, axis=0)
-    min_x, min_y, min_z = np.min(vertices, axis=0)
+    aabb = get_aabb(vertices)
+    max_x, max_y, max_z = aabb.p_e
+    min_x, min_y, min_z = aabb.p_s
     dhx = abs(max_x - min_x) / 2.0
     dhy = abs(max_y - min_y) / 2.0
     dhz = abs(max_z - min_z) / 2.0
 
     center = Vector3((min_x + dhx, min_y + dhy, min_z + dhz))
-    max_p = Vector3((max_x, max_y, max_z))
-    min_p = Vector3((min_x, min_y, min_z))
-    return center, AABB(min_p, max_p)
+    return center, aabb
 
 
 def make_plane(size: float = 1.0, y: float = 0.0) -> MeshData:
