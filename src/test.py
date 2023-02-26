@@ -1,3 +1,4 @@
+import glob
 from typing import Final
 
 import cv2
@@ -218,6 +219,7 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
     results = renderer.project_shots(shots, projection_mode, save=False, save_name_iter=file_name_iter)
 
     if show_count > 0:
+        counter = 0
         # res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
         # res_center_tup = int_up(res_center[0]), int_up(res_center[1])
         for result in results[:show_count]:
@@ -230,7 +232,8 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
             # crop = cv2.resize(crop, None, None, 2.0, 2.0)
             img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
             im_pil = Image.fromarray(img)
-            im_pil.show()
+            im_pil.show(f'Shot {counter}')
+            counter += 1
             # cv2.imshow('delta', crop)
             # cv2.waitKey()
             # cv2.destroyAllWindows()
@@ -240,7 +243,7 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
     # result = cv2.resize(result, None, None, 0.5, 0.5)
     img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
     im_pil = Image.fromarray(img)
-    im_pil.show()
+    im_pil.show('Integral')
     # cv2.imshow('delta', result)
     # cv2.waitKey()
     # cv2.destroyAllWindows()
@@ -391,8 +394,18 @@ def test_fit_to_points(count: int = 1):
     ctx.release()
 
 
+def test_load_all_images(dir: str) -> None:
+    files = glob.glob(f'{dir}*.png')
+
+    file_arr = []
+    for file in files:
+        img = cv2.imread(file)
+        file_arr.append(img)
+
+
 def main() -> None:
     test_projection(25, 0, ProjectMode.SHOT_VIEW_RELATIVE)
+    # test_load_all_images(f'{INPUT_DIR}data\\haag\\')
 
 
 if __name__ == '__main__':

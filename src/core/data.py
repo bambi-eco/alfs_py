@@ -132,7 +132,9 @@ class RenderObject:
             vao = ctx.vertex_array(prog, vao_content)
 
         if texture is not None:
-            tex = ctx.texture(*texture.tex_gen_input(), dtype='f4')
+            tex_input = texture.tex_gen_input()
+            print(tex_input)
+            tex = ctx.texture(*tex_input, dtype='f4')
         else:
             tex = None
 
