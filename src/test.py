@@ -1,21 +1,25 @@
 import glob
+import sys
 from typing import Final
 
 import cv2
 import moderngl as mgl
 import numpy as np
+import pyrr
 from PIL import Image
-from pyrr import Matrix44, Vector3
+from pyrr import Matrix44, Vector3, Quaternion
 
 from src.core.camera import Camera
+from src.core.data import TextureData
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
     TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
+from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
-    get_center, int_up, make_quad, integral
+    get_center, int_up, make_quad, integral, overlay, replace_color
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -206,6 +210,10 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
 
     mesh_data, texture_data = gltf_extract(gltf_file)
 
+    cv2.imwrite(f'{data_dir}gltf_tex.png', cv2.resize(texture_data.texture, None, fx=0.25, fy=0.25))
+    texture_data = TextureData(cv2.imread(f'{data_dir}gltf_tex.png'))
+    print(f'Texture extracted: {texture_data.texture.shape[1::-1]} x {texture_data.texture.shape[2]} [{len(texture_data.texture.tobytes())} bytes]')
+
     center, aabb = get_center(mesh_data.vertices)
     center.z = 1
     ortho_size = int_up(aabb.width), int_up(aabb.height)
@@ -213,40 +221,30 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
-    shots = CtxShot.from_json(json_file, ctx, count=count)
+    correction_rot = Quaternion.from_z_rotation(-0.036, dtype='f4')
+    correction = Transform(rotation=correction_rot, dtype='f4')
+    shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction)
 
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
     results = renderer.project_shots(shots, projection_mode, save=False, save_name_iter=file_name_iter)
 
     if show_count > 0:
-        counter = 0
-        # res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
-        # res_center_tup = int_up(res_center[0]), int_up(res_center[1])
-        for result in results[:show_count]:
-            # crop = crop_to_content(result)
-            # h, w = crop.shape[0:2]
-            # c_d = Vector3([w / 2.0, h / 2.0, 0])
-            # print(f'tl: {res_center + delta - c_d} | br: {res_center + delta + c_d}')
-            # res_delta = (int_up(res_center[0] + delta[0]), int_up(res_center[1] + delta[1]))
-            # cv2.line(result, res_center_tup, res_delta, (255, 0, 0), 5)
-            # crop = cv2.resize(crop, None, None, 2.0, 2.0)
-            img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
-            im_pil = Image.fromarray(img)
-            im_pil.show(f'Shot {counter}')
-            counter += 1
-            # cv2.imshow('delta', crop)
-            # cv2.waitKey()
-            # cv2.destroyAllWindows()
+        for i, result in enumerate(results[:show_count]):
+            # img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+            # im_pil = Image.fromarray(img)
+            # im_pil.show(f'Shot {i}')
+            cv2.imwrite(f'{OUTPUT_DIR}proj/{i}.png', result)
+
+    background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
+    cv2.imwrite(f'{data_dir}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
 
     result = integral(results)
-    # result = crop_to_content(result)
-    # result = cv2.resize(result, None, None, 0.5, 0.5)
     img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+    img = replace_color(img, (0, 0, 0, 255), (0, 0, 0, 0), True)
+    cv2.imwrite(f'{data_dir}integral.png', cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA))
+    img = overlay(background, img)
     im_pil = Image.fromarray(img)
     im_pil.show('Integral')
-    # cv2.imshow('delta', result)
-    # cv2.waitKey()
-    # cv2.destroyAllWindows()
 
     for shot in shots:
         shot.release()
@@ -394,8 +392,8 @@ def test_fit_to_points(count: int = 1):
     ctx.release()
 
 
-def test_load_all_images(dir: str) -> None:
-    files = glob.glob(f'{dir}*.png')
+def test_load_all_images(img_dir: str) -> None:
+    files = glob.glob(f'{img_dir}*.png')
 
     file_arr = []
     for file in files:
@@ -404,7 +402,7 @@ def test_load_all_images(dir: str) -> None:
 
 
 def main() -> None:
-    test_projection(25, 0, ProjectMode.SHOT_VIEW_RELATIVE)
+    test_projection(1, 1, ProjectMode.SHOT_VIEW_RELATIVE)
     # test_load_all_images(f'{INPUT_DIR}data\\haag\\')
 
 

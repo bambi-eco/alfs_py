@@ -262,7 +262,7 @@ class Renderer:
     void main() {{
         vec4 world_pos = {_PAR_MODEL} * vec4({_PAR_POS}.xyz, 1.0);
         gl_Position = {_PAR_PROJ} * {_PAR_VIEW} *  world_pos;
-        v_out_v4_shot_uv = {_PAR_SHOT_PROJ} * {_PAR_SHOT_VIEW} * {_PAR_SHOT_CORRECTION} * world_pos;
+        v_out_v4_shot_uv = {_PAR_SHOT_PROJ} * {_PAR_SHOT_CORRECTION} * {_PAR_SHOT_VIEW}  * world_pos;
         // * {_PAR_SHOT_CORRECTION};
     }}
     """
@@ -279,7 +279,7 @@ class Renderer:
         vec4 uv = v_out_v4_shot_uv;
         uv = vec4(uv.xyz / uv.w / 2.0 + .5, 1.0); // perspective division and conversion to [0,1] from NDC
         
-        if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {{ // uv out of bounds
+        if(uv.w <= 0.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {{ // uv out of bounds
             discard; // throw away the fragment 
             f_out_v4_color = vec4(0.0, 0.0, 0.0, 0.0);
         }} else {{

@@ -92,6 +92,20 @@ def compare_color(col_a: Union[NDArray, Iterable, int, float], col_b: Union[NDAr
     return (col_a == col_b).all()
 
 
+def replace_color(img: NDArray, color_from: Color, color_to: Color, inplace: bool = False) -> NDArray:
+    if inplace:
+        img = img.copy()
+    width, height = img.shape[1::-1]
+    img = np.reshape(img, (height, width, -1))
+    channels = img.shape[-1]
+    color_from = color_from[:channels]
+    color_to = color_to[:channels]
+
+    selection = np.all(img == color_from, axis=-1)
+    img[selection] = color_to
+    return img
+
+
 def overlay(img_a: NDArray, img_b: NDArray) -> Optional[NDArray]:
     """
     Tries to overlay an image onto another

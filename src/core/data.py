@@ -133,8 +133,7 @@ class RenderObject:
 
         if texture is not None:
             tex_input = texture.tex_gen_input()
-            print(tex_input)
-            tex = ctx.texture(*tex_input, dtype='f4')
+            tex = ctx.texture(*tex_input, dtype='f4')  # TODO: throws exception when texture is too big -> cpp issue of moderngl
         else:
             tex = None
 

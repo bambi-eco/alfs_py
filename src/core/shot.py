@@ -65,7 +65,7 @@ class Shot:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-        img = np.flip(img, 0).copy(order='C')  # flip image vertically
+        img = cv2.flip(img, 1)  # flip image horizontally 
         img = img.astype('f4')
         return img
 
@@ -99,7 +99,7 @@ class CtxShot(Shot):
     tex: Texture
 
     def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
-                 fovy: float = 60.0, aspect_ratio: float = 1):
+                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None):
         """
         Initializes a new ``CtxShot`` object
         :param ctx: The context the shot should be associated with
@@ -109,7 +109,7 @@ class CtxShot(Shot):
         :param fovy: The field of view in y direction in degrees of the camera associated with the shot (defaults to 60)
         :param aspect_ratio: The aspect ratio of the view of the camera associated with the shot (defaults to 1)
         """
-        super().__init__(img, position, rotation, fovy, aspect_ratio)
+        super().__init__(img, position, rotation, fovy, aspect_ratio, correction)
         self._released = False
         self.tex = ctx.texture(*self._tex_data.tex_gen_input(), dtype='f4')
 
@@ -129,7 +129,7 @@ class CtxShot(Shot):
 
     @staticmethod
     def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
-                  fovy: float = 60.0) -> list['CtxShot']:
+                  fovy: float = 60.0, correction: Optional[Transform] = None) -> list['CtxShot']:
         """
         Creates context shots from a JSON file
         :param file: The path of the JSON file to process
@@ -137,12 +137,16 @@ class CtxShot(Shot):
         :param count: The maximum amount of shots to be created (optional)
         :param image_dir: The directory of the images referenced in the JSON file (defaults to the JSON files directory)
         :param fovy: The default fovy value to be used when a JSON entry does not provide one
+        :param correction: The general correction to be applied to all shots (optional)
         :return: A list of ``CtxShot`` objects
         """
         shots = []
 
         if image_dir is None:
             image_dir = str(pathlib.Path(file).parent.absolute())
+
+        if correction is None:
+            correction = Transform()
 
         with open(file, 'r') as f:
             data = json.load(f)
@@ -172,6 +176,6 @@ class CtxShot(Shot):
 
             img_file = f'{image_dir}{PATH_SEP}{img_file}'
 
-            shots.append(CtxShot(ctx, img_file, Vector3(position), Quaternion(rotation), fov))
+            shots.append(CtxShot(ctx, img_file, Vector3(position), Quaternion(rotation), fov, correction=correction))
         return shots
 
