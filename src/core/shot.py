@@ -65,7 +65,7 @@ class Shot:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-        img = cv2.flip(img, 1)  # flip image horizontally 
+        img = cv2.flip(img, 1)  # flip image horizontally
         img = img.astype('f4')
         return img
 

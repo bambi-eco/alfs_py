@@ -331,7 +331,7 @@ def gltf_to_texture_data(gltf: GLTF) -> Optional[TextureData]:
     return TextureData(texture) if texture is not None else None
 
 
-def gltf_extract(file: str) -> tuple[MeshData, TextureData]:
+def gltf_extract(file: str) -> tuple[Optional[MeshData], Optional[TextureData]]:
     """
     Extracts mesh and texture data from a GLTF file via ``get_mesh_data`` and ``get_texture_data``
     :param file: Path to a GLTF file

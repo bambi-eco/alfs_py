@@ -10,6 +10,9 @@ from pyrr import Vector3
 PATH_SEP: Final[str] = os.sep
 EPSILON: Final[float] = sys.float_info.epsilon
 
+CPP_INT_MAX: Final[int] = 2147483648
+MAX_TEX_DIM: Final[int] = 4096
+
 # TYPES
 Number: Type = Union[int, float]
 Color: Type = Union[Number, tuple[Number, Number, Number], tuple[Number, Number, Number, Number]]

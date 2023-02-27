@@ -1,6 +1,8 @@
-from typing import Optional
+import sys
+from typing import Optional, Any
 
 import cv2
+import numpy as np
 from attr import define, dataclass
 from moderngl import VertexArray, Buffer, Texture, Program
 from numpy.typing import NDArray
@@ -49,6 +51,40 @@ class TextureData:
         :return: Returns a tuple containing size, component count and a byte representation of the given texture
         """
         return self.texture.shape[1::-1], self.texture.shape[2], self.to_bytes()
+
+    def byte_size(self, dtype: Any = None) -> int:
+        """
+        Computes the size of the texture held by this object assuming each value will be encoded as the given dtype.
+        :param dtype: The type the color values of the texture will be expressed with (defaults to texture type)
+        :return: The byte size of the texture held by this object.
+        """
+        if dtype is None:
+            dtype = self.texture.dtype
+        w, h = self.texture.shape[1::-1]
+        c = self.texture.shape[-1] if len(self.texture.shape) >= 3 else 1
+        return w * h * c * np.dtype(dtype).itemsize
+
+    def scale_to_fit(self, size: int, dtype: Any = None) -> None:
+        """
+        Scales the texture held by this object to fit the given size in bytes.
+        This method only reduces the scale of textures.
+        :param size: The amount of bytes to occupy.
+        :param dtype: The dtype to be used for calculations (defaults to texture type)
+        """
+        if self.byte_size(dtype=dtype) < size:
+            return
+
+        if dtype is None:
+            dtype = self.texture.dtype
+
+        width, height = self.texture.shape[1::-1]
+        channels = self.texture.shape[-1] if len(self.texture.shape) >= 3 else 1
+        byte_depth = np.dtype(dtype).itemsize
+        ratio = width/height
+        n_height = np.sqrt(size/(ratio*channels*byte_depth))
+        n_width = n_height * ratio
+        self.texture = cv2.resize(self.texture, (int(n_height), int(n_width)))
+
 
 
 @dataclass

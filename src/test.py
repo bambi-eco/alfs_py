@@ -13,13 +13,13 @@ from src.core.camera import Camera
 from src.core.data import TextureData
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
     TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, DEF_FRAG_SHADER_PATH, \
-    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
+    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, CPP_INT_MAX, MAGENTA, BLACK, MAX_TEX_DIM
 from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
 from src.core.utils import img_from_fbo, gltf_extract, crop_to_content, split_components, \
-    get_center, int_up, make_quad, integral, overlay, replace_color
+    get_center, int_up, make_quad, integral, overlay, replace_color, gen_checkerboard_tex
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -210,9 +210,31 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
 
     mesh_data, texture_data = gltf_extract(gltf_file)
 
-    cv2.imwrite(f'{data_dir}gltf_tex.png', cv2.resize(texture_data.texture, None, fx=0.25, fy=0.25))
-    texture_data = TextureData(cv2.imread(f'{data_dir}gltf_tex.png'))
-    print(f'Texture extracted: {texture_data.texture.shape[1::-1]} x {texture_data.texture.shape[2]} [{len(texture_data.texture.tobytes())} bytes]')
+    if mesh_data is None:
+        raise ValueError('Mesh data could not be extracted')
+
+    if texture_data is None:
+        texture_data = TextureData(gen_checkerboard_tex(8, 8, MAGENTA, BLACK, dtype='f4'))
+        print(f'No texture extracted: Default texture was generated')
+    else:
+        byte_size = texture_data.byte_size(dtype='f4')
+        width, height = texture_data.texture.shape[1::-1]
+        print(f'Texture extracted: ({width}, {height}) x {texture_data.texture.shape[2]} [{byte_size} B]')
+
+        if width > MAX_TEX_DIM or height > MAX_TEX_DIM:
+            if width > height:
+                fact = MAX_TEX_DIM / width
+            else:
+                fact = MAX_TEX_DIM / height
+            texture_data.texture = cv2.resize(texture_data.texture, None, fx=fact, fy=fact)
+            print(f'Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+                  f'to fit texture dimension restriction of {MAX_TEX_DIM}px')
+            byte_size = texture_data.byte_size(dtype='f4')
+
+        if byte_size > CPP_INT_MAX:
+            texture_data.scale_to_fit(CPP_INT_MAX, dtype='f4')  # necessary since moderngl uses this data type
+            print(f'Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+                  f'to fit size restriction of {CPP_INT_MAX} B')
 
     center, aabb = get_center(mesh_data.vertices)
     center.z = 1
@@ -221,7 +243,7 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
 
-    correction_rot = Quaternion.from_z_rotation(-0.036, dtype='f4')
+    correction_rot = Quaternion.from_z_rotation(-0.026, dtype='f4')
     correction = Transform(rotation=correction_rot, dtype='f4')
     shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction)
 
@@ -236,12 +258,12 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
             cv2.imwrite(f'{OUTPUT_DIR}proj/{i}.png', result)
 
     background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
-    cv2.imwrite(f'{data_dir}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
+    cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
 
     result = integral(results)
     img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
     img = replace_color(img, (0, 0, 0, 255), (0, 0, 0, 0), True)
-    cv2.imwrite(f'{data_dir}integral.png', cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA))
+    cv2.imwrite(f'{OUTPUT_DIR}integral.png', cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA))
     img = overlay(background, img)
     im_pil = Image.fromarray(img)
     im_pil.show('Integral')
@@ -402,7 +424,7 @@ def test_load_all_images(img_dir: str) -> None:
 
 
 def main() -> None:
-    test_projection(1, 1, ProjectMode.SHOT_VIEW_RELATIVE)
+    test_projection(400, 0, ProjectMode.SHOT_VIEW_RELATIVE)
     # test_load_all_images(f'{INPUT_DIR}data\\haag\\')
 
 
