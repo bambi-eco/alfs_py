@@ -5,7 +5,6 @@ from functools import cached_property
 from typing import Final, Optional, Iterable, Union, Iterator, Callable
 
 import cv2
-from PIL import Image
 from moderngl import Context, Program, Framebuffer
 from numpy.typing import NDArray
 from pyrr import Matrix44
@@ -16,7 +15,9 @@ from src.core.decorators import incomplete
 from src.core.defs import TRANSPARENT, BLACK, MAGENTA
 from src.core.geo.frustum import Frustum
 from src.core.shot import CtxShot
-from src.core.utils import img_from_fbo, overlay, crop_to_content, gen_checkerboard_tex, get_center, int_up, get_aabb
+from src.core.util.basic import gen_checkerboard_tex, get_center, int_up, get_aabb
+from src.core.util.image import overlay
+from src.core.util.moderngl import img_from_fbo
 
 
 class ProjectMode(Enum):

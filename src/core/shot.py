@@ -13,7 +13,7 @@ from src.core.camera import Camera
 from src.core.data import TextureData
 from src.core.defs import PATH_SEP
 from src.core.geo.transform import Transform
-from src.core.utils import get_first_valid
+from src.core.util.basic import get_first_valid
 
 
 class Shot:
