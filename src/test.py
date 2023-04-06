@@ -22,7 +22,7 @@ from src.core.util.gltf import gltf_extract
 from src.core.util.image import crop_to_content, split_components, integral, overlay, replace_color, laplacian_variance
 from src.core.util.moderngl import img_from_fbo
 
-_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)
+_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 4, 1024 * 4)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
 
 _FOV: Final[float] = 45.0
@@ -210,6 +210,8 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
 
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
+    # ctx.enable(mgl.CULL_FACE)
+    # ctx.cull_face = 'back'
 
     data_dir = f'{INPUT_DIR}data\\haag\\'
     gltf_file = f'{data_dir}dem_mesh_r2.glb'
@@ -463,12 +465,14 @@ def test_image_metrics() -> None:
 
 def main() -> None:
 
-    correction = Transform()
+    test_projection(10, 1)
+
+    # correction = Transform()
     # vals = np.arange(-1, 1.05, 0.1) * 0.08726646
     # for val in vals:
-    correction_rot = Quaternion.from_z_rotation(0.08726646, dtype='f4')
-    correction.rotation = correction_rot
-    test_projection(100, 0, ProjectMode.SHOT_VIEW_RELATIVE, correction, f'{0.08726646*1000:.0f}')
+    # correction_rot = Quaternion.from_z_rotation(0.08726646, dtype='f4')
+    # correction.rotation = correction_rot
+    # test_projection(100, 0, ProjectMode.SHOT_VIEW_RELATIVE, correction, f'{0.08726646*1000:.0f}')
     # test_load_all_images(f'{INPUT_DIR}data\\haag\\')
 
     # test_image_metrics()
