@@ -5,6 +5,7 @@ from functools import cached_property
 from typing import Final, Optional, Iterable, Union, Iterator, Callable
 
 import cv2
+import numpy as np
 from moderngl import Context, Program, Framebuffer
 from numpy.typing import NDArray
 from pyrr import Matrix44
@@ -24,6 +25,9 @@ class ProjectMode(Enum):
     COMPLETE_VIEW = 0,
     SHOT_VIEW_RELATIVE = 1,
     SHOT_VIEW_EXCLUSIVE = 2,
+
+    def __str__(self):
+        return self.name
 
 
 class Renderer:
@@ -122,18 +126,23 @@ class Renderer:
         result = img_from_fbo(self._fbo)
         return result
 
-    def _psi_complete_view(self, shots: Iterable[CtxShot]) -> Iterator[NDArray]:
+    def _psi_complete_view(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         background = self.render_ground()
         for shot in shots:
             result = self._project_shot(shot)
+            if release_shots:
+                shot.release()
             yield overlay(background, result)
 
-    def _psi_shot_view_relative(self, shots: Iterable[CtxShot]) -> Iterator[NDArray]:
+    def _psi_shot_view_relative(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         for shot in shots:
-            yield self._project_shot(shot)
+            result = self._project_shot(shot)
+            if release_shots:
+                shot.release()
+            yield result
 
     @incomplete('Method for projecting points not finished yet')
-    def _psi_shot_view_exclusive(self, shots: Iterable[CtxShot]) -> Iterator[NDArray]:
+    def _psi_shot_view_exclusive(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         camera_cache = deepcopy(self.camera)
         for shot in shots:
             # compute projected points
@@ -147,40 +156,47 @@ class Renderer:
             self.apply_camera()
 
             # project shot
-            yield self._project_shot(shot)
+            result = self._project_shot(shot)
+
+            if release_shots:
+                shot.release()
+            yield result
 
         # reset camera
         self.camera = camera_cache
 
     @cached_property
-    def _psi_look_up(self) -> dict[ProjectMode, Callable[[Iterable[CtxShot]], Iterator[NDArray]]]:
+    def _psi_look_up(self) -> dict[ProjectMode, Callable[[Iterable[CtxShot], bool], Iterator[NDArray]]]:
         # Maybe make this static somehow
         def default(_):
             raise NotImplementedError(f'Renderer is using invalid projection mode')
-        result = defaultdict(default)
+        result: dict[ProjectMode, Callable[[Iterable[CtxShot]], Iterator[NDArray]]] = defaultdict(default)
         result[ProjectMode.COMPLETE_VIEW] = self._psi_complete_view
         result[ProjectMode.SHOT_VIEW_RELATIVE] = self._psi_shot_view_relative
         result[ProjectMode.SHOT_VIEW_EXCLUSIVE] = self._psi_shot_view_exclusive
         return result
 
-    def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode) -> Iterator[NDArray]:
+    def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
+                           release_shots: bool = False) -> Iterator[NDArray]:
         """
         Projects and renders all passed shots
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
+        :param release_shots: Whether shots should be released after projection (defaults to ``False``)
         :return: An iterator iterating over all performed projections
         """
         if not isinstance(shots, Iterable):
             shots = [shots]
 
-        return self._psi_look_up[mode](shots)
+        return self._psi_look_up[mode](shots, release_shots)
 
-    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
+    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode, release_shots: bool = False,
                       save: bool = False, save_name_iter: Optional[Iterator[str]] = None) -> Optional[list[NDArray]]:
         """
         Projects and renders all passed shots
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
+        :param release_shots: Whether shots should be released after projection (defaults to ``False``)
         :param save: Whether the images should be directly saved instead of being returned
         :param save_name_iter: An iterator iterating over file names to be used when the projections should be saved
         instead of being returned
@@ -198,7 +214,7 @@ class Renderer:
             def handle_result(res: NDArray) -> None:
                 results.append(res)
 
-        for result in self.project_shots_iter(shots, mode):
+        for result in self.project_shots_iter(shots, mode, release_shots):
             handle_result(result)
 
         return results

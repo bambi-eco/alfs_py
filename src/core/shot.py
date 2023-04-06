@@ -96,10 +96,12 @@ class Shot:
 
 class CtxShot(Shot):
     _released: bool
-    tex: Texture
+    _ctx: Final[Context]
+    tex: Optional[Texture]
+    lazy: Final[bool]
 
     def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
-                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None):
+                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None, lazy: bool = False):
         """
         Initializes a new ``CtxShot`` object
         :param ctx: The context the shot should be associated with
@@ -108,28 +110,41 @@ class CtxShot(Shot):
         :param rotation: The rotation of the camera associated with the shot
         :param fovy: The field of view in y direction in degrees of the camera associated with the shot (defaults to 60)
         :param aspect_ratio: The aspect ratio of the view of the camera associated with the shot (defaults to 1)
+        :param correction: Correction transform to be applied to the shot (optional)
+        :param lazy: Whether the shot should be loaded lazily (defaults to ``False``)
         """
         super().__init__(img, position, rotation, fovy, aspect_ratio, correction)
         self._released = False
-        self.tex = ctx.texture(*self._tex_data.tex_gen_input(), dtype='f4')
+        self._ctx = ctx
+        self.lazy = lazy
+        if not lazy:
+            self._init_texture()
+        else:
+            self.tex = None
+
+    def _init_texture(self):
+        self.tex = self._ctx.texture(*self._tex_data.tex_gen_input(), dtype='f4')
 
     def release(self) -> None:
         """
         Releases all objects associated with the given context
         """
         if not self._released:
-            self.tex.release()
+            if self.tex is not None:
+                self.tex.release()
             self._released = True
 
     def tex_use(self) -> None:
         """
         Binds the texture of this object to a texture unit
         """
+        if self.tex is None:
+            self._init_texture()
         self.tex.use()
 
     @staticmethod
     def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
-                  fovy: float = 60.0, correction: Optional[Transform] = None) -> list['CtxShot']:
+                  fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) -> list['CtxShot']:
         """
         Creates context shots from a JSON file
         :param file: The path of the JSON file to process
@@ -138,6 +153,7 @@ class CtxShot(Shot):
         :param image_dir: The directory of the images referenced in the JSON file (defaults to the JSON files directory)
         :param fovy: The default fovy value to be used when a JSON entry does not provide one
         :param correction: The general correction to be applied to all shots (optional)
+        :param lazy: Whether the created shots should be lazy loaded (defaults to ``False``)
         :return: A list of ``CtxShot`` objects
         """
         shots = []

@@ -201,22 +201,36 @@ def test_crop_to_content():
     cv2.imwrite(f'{OUTPUT_DIR}crop.png', img)
 
 
-def test_projection(count: int = 1, show_count: int = 0, projection_mode: ProjectMode = ProjectMode.COMPLETE_VIEW,
+class DoneCallback:
+
+    def __init__(self):
+        self.start = time.time()
+        self.last = self.start
+
+    def __call__(self, print_msg: bool = True):
+        current = time.time()
+        if print_msg:
+            print(f'    Done [{(current - self.last) * 1000:.3f} ms]')
+        self.last = current
+
+
+def test_projection(count: int = 1, show_count: int = -1, projection_mode: ProjectMode = ProjectMode.SHOT_VIEW_RELATIVE,
+                    lazy: bool = True, release_shots: bool = True,
                     correction: Optional[Transform] = None, suffix: str = ''):
 
-    start = time.time()
-    last = start
+    done = DoneCallback()
     print('Start projection process')
 
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
-    # ctx.enable(mgl.CULL_FACE)
-    # ctx.cull_face = 'back'
+    ctx.enable(mgl.CULL_FACE)
+    ctx.cull_face = 'back'
 
     data_dir = f'{INPUT_DIR}data\\haag\\'
     gltf_file = f'{data_dir}dem_mesh_r2.glb'
     json_file = f'{data_dir}poses.json'
 
+    print(f'  Reading GLTF file from "[{gltf_file}]')
     mesh_data, texture_data = gltf_extract(gltf_file)
 
     if mesh_data is None:
@@ -224,11 +238,11 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
 
     if texture_data is None:
         texture_data = TextureData(gen_checkerboard_tex(8, 8, MAGENTA, BLACK, dtype='f4'))
-        print(f'  No texture extracted: Default texture was generated')
+        print(f'    No texture extracted: Default texture was generated')
     else:
         byte_size = texture_data.byte_size(dtype='f4')
         width, height = texture_data.texture.shape[1::-1]
-        print(f'  Texture extracted: ({width}, {height}) x {texture_data.texture.shape[2]} [{byte_size} B]')
+        print(f'    Texture extracted: ({width}, {height}) x {texture_data.texture.shape[2]} [{byte_size} B]')
 
         if width > MAX_TEX_DIM or height > MAX_TEX_DIM:
             if width > height:
@@ -236,66 +250,68 @@ def test_projection(count: int = 1, show_count: int = 0, projection_mode: Projec
             else:
                 fact = MAX_TEX_DIM / height
             texture_data.texture = cv2.resize(texture_data.texture, None, fx=fact, fy=fact)
-            print(f'  Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+            print(f'    Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
                   f'to fit texture dimension restriction of {MAX_TEX_DIM}px')
             byte_size = texture_data.byte_size(dtype='f4')
 
         if byte_size > CPP_INT_MAX:
             texture_data.scale_to_fit(CPP_INT_MAX, dtype='f4')  # necessary since moderngl uses this data type
-            print(f'  Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+            print(f'    Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
                   f'to fit size restriction of {CPP_INT_MAX} B')
 
     center, aabb = get_center(mesh_data.vertices)
     center.z = 1
     ortho_size = int_up(aabb.width), int_up(aabb.height)
+    done()
 
-    cur = time.time()
-    print(f'  Done reading files       [{(cur - last) * 1000:.3f} ms]')
-    last = cur
-
+    print(f'  Creating context and renderer')
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
+    done()
 
-    shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction)
+    print(f'  Extracting shots from JSON (creating lazy shots: {lazy})')
+    shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction, lazy=True)
+    done()
 
+    print(f'  Projecting shots (Mode: {projection_mode}; Release single shots after projection: {release_shots})')
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-    results = renderer.project_shots(shots, projection_mode, save=False, save_name_iter=file_name_iter)
-
-    cur = time.time()
-    print(f'  Done projecting shots    [{(cur - last) * 1000:.3f} ms]')
-    last = cur
+    results = renderer.project_shots(shots, projection_mode, save=False, save_name_iter=file_name_iter, release_shots=True)
+    done()
 
     if show_count > 0:
+        print(f'  Showing {show_count} individual results')
         for i, result in enumerate(results[:show_count]):
             # img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
             # im_pil = Image.fromarray(img)
             # im_pil.show(f'Shot {i}')
             cv2.imwrite(f'{OUTPUT_DIR}proj/{i}.png', result)
+        done()
 
+    print('  Rendering background')
     background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
     cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
+    done()
 
+    print('  Computing integral')
     result = integral(results)
+    done()
 
-    cur = time.time()
-    print(f'  Done computing integral  [{(cur - last) * 1000:.3f} ms]')
-    last = cur
-
+    print('  Processing and showing integral')
     img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
     img = replace_color(img, (0, 0, 0, 255), (0, 0, 0, 0), True)
     cv2.imwrite(f'{OUTPUT_DIR}integral{suffix}.png', cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA))
     img = overlay(background, img)
     im_pil = Image.fromarray(img)
     im_pil.show('Integral')
+    done()
 
+    print('  Release all resources')
     for shot in shots:
         shot.release()
 
     renderer.release()
     ctx.release()
-
-    cur = time.time()
-    print(f'  Done cleaning up         [{(cur - last) * 1000:.3f} ms]')
+    done()
 
 
 def test_deferred_shading() -> None:
@@ -465,7 +481,7 @@ def test_image_metrics() -> None:
 
 def main() -> None:
 
-    test_projection(10, 1)
+    test_projection(100)
 
     # correction = Transform()
     # vals = np.arange(-1, 1.05, 0.1) * 0.08726646
