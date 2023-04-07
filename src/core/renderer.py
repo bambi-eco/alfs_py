@@ -72,6 +72,10 @@ class Renderer:
         self.camera = camera
         self.apply_camera()
 
+    @property
+    def render_shape(self) -> tuple[int, int, int]:
+        return self._resolution[1], self._resolution[0], 4
+
     def _get_shot_render_object(self) -> RenderObject:
         vertex_buf = self._obj.vertex_buf
         vao_content = [(vertex_buf, '3f4', self._PAR_POS)]
@@ -190,34 +194,61 @@ class Renderer:
 
         return self._psi_look_up[mode](shots, release_shots)
 
-    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode, release_shots: bool = False,
-                      save: bool = False, save_name_iter: Optional[Iterator[str]] = None) -> Optional[list[NDArray]]:
+    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
+                      release_shots: bool = False, integral: bool = False, save: bool = False,
+                      save_name_iter: Optional[Iterator[str]] = None) -> Optional[Union[NDArray, list[NDArray]]]:
         """
         Projects and renders all passed shots
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
         :param release_shots: Whether shots should be released after projection (defaults to ``False``)
-        :param save: Whether the images should be directly saved instead of being returned
+        :param integral: Whether the result should be the integral of all rendered shots instead of single shot renders
+        (defaults to False)
+        :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``)
         :param save_name_iter: An iterator iterating over file names to be used when the projections should be saved
         instead of being returned
         :return: If save is ``True`` ``None``; otherwise a list of images representing all performed projections
         """
 
-        if save:
-            results = None
-
-            def handle_result(res: NDArray) -> NDArray:
-                return cv2.imwrite(next(save_name_iter), res)
-        else:
-            results = []
+        if integral:
+            integral_arr = [np.zeros(self.render_shape)]
 
             def handle_result(res: NDArray) -> None:
-                results.append(res)
+                integral_arr[0] += res
+                del res
 
-        for result in self.project_shots_iter(shots, mode, release_shots):
-            handle_result(result)
+            for result in self.project_shots_iter(shots, mode, release_shots):
+                handle_result(result)
 
-        return results
+            out = np.zeros(self.render_shape)
+            integral_result = integral_arr[0]
+            alpha = integral_result[:, :, -1][:, :, np.newaxis]
+            mask = (alpha >= 1.0)
+            result = np.divide(integral_result, alpha, out=out, where=mask)
+            result = (result * 255).astype(np.uint8)
+
+            if save:
+                cv2.imwrite(next(save_name_iter), result)
+            else:
+                return result
+        else:
+
+            if save:
+                results = None
+
+                def handle_result(res: NDArray) -> None:
+                    cv2.imwrite(next(save_name_iter), res)
+                    del res
+            else:
+                results = []
+
+                def handle_result(res: NDArray) -> None:
+                    results.append(res)
+
+            for result in self.project_shots_iter(shots, mode, release_shots):
+                handle_result(result)
+
+            return results
 
     # region Shader Constants
 

@@ -215,7 +215,7 @@ class DoneCallback:
 
 
 def test_projection(count: int = 1, show_count: int = -1, projection_mode: ProjectMode = ProjectMode.SHOT_VIEW_RELATIVE,
-                    lazy: bool = True, release_shots: bool = True,
+                    lazy: bool = True, render_integral: bool = True, release_shots: bool = True,
                     correction: Optional[Transform] = None, suffix: str = ''):
 
     done = DoneCallback()
@@ -270,39 +270,52 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
     done()
 
     print(f'  Extracting shots from JSON (creating lazy shots: {lazy})')
-    shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction, lazy=True)
+    shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction, lazy=lazy)
     done()
-
-    print(f'  Projecting shots (Mode: {projection_mode}; Release single shots after projection: {release_shots})')
-    file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-    results = renderer.project_shots(shots, projection_mode, save=False, save_name_iter=file_name_iter, release_shots=True)
-    done()
-
-    if show_count > 0:
-        print(f'  Showing {show_count} individual results')
-        for i, result in enumerate(results[:show_count]):
-            # img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
-            # im_pil = Image.fromarray(img)
-            # im_pil.show(f'Shot {i}')
-            cv2.imwrite(f'{OUTPUT_DIR}proj/{i}.png', result)
-        done()
 
     print('  Rendering background')
     background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
     cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     done()
 
-    print('  Computing integral')
-    result = integral(results)
+    print(f'  Projecting shots (Mode: {projection_mode}; Render integral: {render_integral}; Release single shots after projection: {release_shots})')
+    file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
+    results = renderer.project_shots(shots, projection_mode, integral=render_integral, save=False, save_name_iter=file_name_iter, release_shots=True)
     done()
 
-    print('  Processing and showing integral')
-    img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
-    img = replace_color(img, (0, 0, 0, 255), (0, 0, 0, 0), True)
-    cv2.imwrite(f'{OUTPUT_DIR}integral{suffix}.png', cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA))
-    img = overlay(background, img)
-    im_pil = Image.fromarray(img)
-    im_pil.show('Integral')
+    if render_integral:
+        print('  Showing integral')
+        result = results
+        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+        img = overlay(background, img)
+        im_pil = Image.fromarray(img)
+        im_pil.show('Integral')
+        done()
+    else:
+        if show_count > 0:
+            print(f'  Showing {show_count} individual results')
+            for i, result in enumerate(results[:show_count]):
+                # img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+                # im_pil = Image.fromarray(img)
+                # im_pil.show(f'Shot {i}')
+                cv2.imwrite(f'{OUTPUT_DIR}proj/{i}.png', result)
+            done()
+
+        print('  Computing integral')
+        result = integral(results)
+        done()
+
+        print('  Processing and showing integral')
+        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+        img = replace_color(img, (0, 0, 0, 255), (0, 0, 0, 0), True)
+        cv2.imwrite(f'{OUTPUT_DIR}integral{suffix}.png', cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA))
+        img = overlay(background, img)
+        im_pil = Image.fromarray(img)
+        im_pil.show('Integral')
+        done()
+
+    print('  Saving integral image')
+    im_pil.save(f'{OUTPUT_DIR}integral.png')
     done()
 
     print('  Release all resources')
@@ -481,7 +494,7 @@ def test_image_metrics() -> None:
 
 def main() -> None:
 
-    test_projection(100)
+    test_projection(1000)
 
     # correction = Transform()
     # vals = np.arange(-1, 1.05, 0.1) * 0.08726646

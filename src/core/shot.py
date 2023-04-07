@@ -16,42 +16,47 @@ from src.core.geo.transform import Transform
 from src.core.util.basic import get_first_valid
 
 
-class Shot:
-    """
-    Represents the combination of a camera and a picture taken by that camera
-    """
+class CtxShot:
     camera: Final[Camera]
     correction: Transform
-    _tex_data: TextureData
+    lazy: Final[bool]
 
-    def __init__(self, img: Union[str, NDArray], position: Vector3, rotation: Quaternion, fovy: float = 60.0,
-                 aspect_ratio: float = 1, correction: Optional[Transform] = None):
+    tex_data: Optional[TextureData]
+    tex: Optional[Texture]
+
+    _ctx: Final[Context]
+    _img: Union[str, NDArray]
+    _released: bool
+
+    def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
+                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None, lazy: bool = False):
         """
-        Initializes a new ``Shot`` object
+        Initializes a new ``CtxShot`` object
+        :param ctx: The context the shot should be associated with
         :param img: Either the path to an image file as a string, or an already loaded image as an RGB numpy array
         :param position: The position of the camera associated with the shot
         :param rotation: The rotation of the camera associated with the shot
         :param fovy: The field of view in y direction in degrees of the camera associated with the shot (defaults to 60)
         :param aspect_ratio: The aspect ratio of the view of the camera associated with the shot (defaults to 1)
+        :param correction: Correction transform to be applied to the shot (optional)
+        :param lazy: Whether the shot should be loaded lazily (defaults to ``False``)
         """
         self._released = False
+
         self.camera = Camera(fovy, aspect_ratio, position=position, rotation=rotation)
         if correction is None:
             self.correction = Transform(dtype='f4')
         else:
             self.correction = copy.deepcopy(correction)
 
-        if isinstance(img, np.ndarray):
-            self._tex_data = TextureData(img.copy())
-        else:
-            self._tex_data = TextureData(self._load_image(str(img)))
-
-    @property
-    def img(self) -> NDArray:
-        """
-        :return: A copy of the picture associated with the shot
-        """
-        return TextureData.texture.copy()
+        self._ctx = ctx
+        self._img = img
+        self.lazy = lazy
+        self.tex_data = None
+        self.tex = None
+        if not lazy:
+            self._init_texture_data()
+            self._init_texture()
 
     @staticmethod
     def _load_image(texture_filename) -> NDArray:
@@ -69,11 +74,58 @@ class Shot:
         img = img.astype('f4')
         return img
 
+    def _init_texture_data(self):
+        if self.tex_data is None and not self._released:
+            if isinstance(self._img, np.ndarray):
+                self.tex_data = TextureData(self._img.copy())
+            else:
+                self.tex_data = TextureData(self._load_image(str(self._img)))
+
+    def _init_texture(self):
+        if self.tex is None and not self._released:
+            self.tex = self._ctx.texture(*self.tex_data.tex_gen_input(), dtype='f4')
+
+    @property
+    def img(self) -> Optional[NDArray]:
+        """
+        :return: A copy of the picture associated with the shot
+        """
+        if self.tex_data is not None:
+            return self.tex_data.texture.copy()
+        else:
+            return None
+
     def get_proj(self) -> Matrix44:
         """
         :return: A matrix representing the projection of this shots camera
         """
         return self.camera.get_proj(dtype='f4')
+
+    def release(self) -> None:
+        """
+        Releases all objects associated with the given context
+        """
+        if not self._released:
+            if self.tex_data is not None:
+                del self.tex_data
+                self.tex_data = None
+
+            if self.tex is not None:
+                self.tex.release()
+                del self.tex
+                self.tex = None
+
+            self._released = True
+
+    def tex_use(self) -> None:
+        """
+        Binds the texture of this object to a texture unit
+        """
+        if self.tex_data is None:
+            self._init_texture_data()
+        if self.tex is None:
+            self._init_texture()
+        self.tex.use()
 
     def get_view(self) -> Matrix44:
         """
@@ -92,55 +144,6 @@ class Shot:
         :return: A matrix representing the combination of projection, view, and correction of this shot
         """
         return self.camera.get_mat(dtype='f4') * self.get_correction()
-
-
-class CtxShot(Shot):
-    _released: bool
-    _ctx: Final[Context]
-    tex: Optional[Texture]
-    lazy: Final[bool]
-
-    def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
-                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None, lazy: bool = False):
-        """
-        Initializes a new ``CtxShot`` object
-        :param ctx: The context the shot should be associated with
-        :param img: Either the path to an image file as a string, or an already loaded image as an RGB numpy array
-        :param position: The position of the camera associated with the shot
-        :param rotation: The rotation of the camera associated with the shot
-        :param fovy: The field of view in y direction in degrees of the camera associated with the shot (defaults to 60)
-        :param aspect_ratio: The aspect ratio of the view of the camera associated with the shot (defaults to 1)
-        :param correction: Correction transform to be applied to the shot (optional)
-        :param lazy: Whether the shot should be loaded lazily (defaults to ``False``)
-        """
-        super().__init__(img, position, rotation, fovy, aspect_ratio, correction)
-        self._released = False
-        self._ctx = ctx
-        self.lazy = lazy
-        if not lazy:
-            self._init_texture()
-        else:
-            self.tex = None
-
-    def _init_texture(self):
-        self.tex = self._ctx.texture(*self._tex_data.tex_gen_input(), dtype='f4')
-
-    def release(self) -> None:
-        """
-        Releases all objects associated with the given context
-        """
-        if not self._released:
-            if self.tex is not None:
-                self.tex.release()
-            self._released = True
-
-    def tex_use(self) -> None:
-        """
-        Binds the texture of this object to a texture unit
-        """
-        if self.tex is None:
-            self._init_texture()
-        self.tex.use()
 
     @staticmethod
     def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
@@ -192,6 +195,6 @@ class CtxShot(Shot):
 
             img_file = f'{image_dir}{PATH_SEP}{img_file}'
 
-            shots.append(CtxShot(ctx, img_file, Vector3(position), Quaternion(rotation), fov, correction=correction))
+            shots.append(CtxShot(ctx, img_file, Vector3(position), Quaternion(rotation), fov, correction=correction, lazy=lazy))
         return shots
 
