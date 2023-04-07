@@ -60,7 +60,7 @@ def replace_color(img: NDArray, color_from: Color, color_to: Color, inplace: boo
     return img
 
 
-def overlay(img_a: NDArray, img_b: NDArray) -> Optional[NDArray]:  # TODO: Improve the runtime of this
+def overlay(img_a: NDArray, img_b: NDArray) -> Optional[NDArray]:
     """
     Tries to overlay an image onto another
     :param img_a: The image serving as background
@@ -186,7 +186,7 @@ def blend(images: Sequence[NDArray]) -> Optional[NDArray]:
     return result
 
 
-def integral(images: Sequence[NDArray], dtype=None) -> Optional[NDArray]:   # TODO: Improve the runtime of this
+def integral(images: Sequence[NDArray], dtype=None) -> Optional[NDArray]:
     """
     Overlaps all given images and blends them together weighted by the amount of non-transparent overlaps per pixel.
     :param images: A sequence of images to blend together
@@ -204,7 +204,6 @@ def integral(images: Sequence[NDArray], dtype=None) -> Optional[NDArray]:   # TO
     if dtype is None:
         dtype = images[0].dtype
 
-    #stack = np.stack(images, axis=-1).sum(axis=-1)
     stack = np.sum(images, axis=0)
     overlaps = stack[:, :, -1]
     overlaps[overlaps <= 1.0] = 1.0
