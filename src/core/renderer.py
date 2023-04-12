@@ -174,6 +174,7 @@ class Renderer:
         # Maybe make this static somehow
         def default(_):
             raise NotImplementedError(f'Renderer is using invalid projection mode')
+
         result: dict[ProjectMode, Callable[[Iterable[CtxShot]], Iterator[NDArray]]] = defaultdict(default)
         result[ProjectMode.COMPLETE_VIEW] = self._psi_complete_view
         result[ProjectMode.SHOT_VIEW_RELATIVE] = self._psi_shot_view_relative
