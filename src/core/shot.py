@@ -6,6 +6,7 @@ from typing import Union, Final, Optional
 import cv2
 import numpy as np
 from moderngl import Context, Texture
+from numpy import deg2rad
 from numpy.typing import NDArray
 from pyrr import Vector3, Quaternion, Matrix44
 
@@ -25,11 +26,12 @@ class CtxShot:
     tex: Optional[Texture]
 
     _ctx: Final[Context]
-    _img: Union[str, NDArray]
+    _img_file: Optional[str] = None
     _released: bool
 
     def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
-                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None, lazy: bool = False):
+                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None,
+                 lazy: bool = False):
         """
         Initializes a new ``CtxShot`` object
         :param ctx: The context the shot should be associated with
@@ -39,7 +41,8 @@ class CtxShot:
         :param fovy: The field of view in y direction in degrees of the camera associated with the shot (defaults to 60)
         :param aspect_ratio: The aspect ratio of the view of the camera associated with the shot (defaults to 1)
         :param correction: Correction transform to be applied to the shot (optional)
-        :param lazy: Whether the shot should be loaded lazily (defaults to ``False``)
+        :param lazy: Whether the shot should be loaded lazily (defaults to ``False``). This also loads the image lazily
+        from the drive when an image-file-path is given.
         """
         self._released = False
 
@@ -50,12 +53,15 @@ class CtxShot:
             self.correction = copy.deepcopy(correction)
 
         self._ctx = ctx
-        self._img = img
+        if isinstance(img, np.ndarray):
+            self.tex_data = TextureData(img.copy())
+        else:
+            self._img_file = img
         self.lazy = lazy
         self.tex_data = None
         self.tex = None
         if not lazy:
-            self._init_texture_data()
+            self.load_image()
             self._init_texture()
 
     @staticmethod
@@ -74,12 +80,12 @@ class CtxShot:
         img = img.astype('f4')
         return img
 
-    def _init_texture_data(self):
-        if self.tex_data is None and not self._released:
-            if isinstance(self._img, np.ndarray):
-                self.tex_data = TextureData(self._img.copy())
-            else:
-                self.tex_data = TextureData(self._load_image(str(self._img)))
+    def load_image(self):
+        """
+        When the shot was initialized using a file path, replaces this path with a loaded version of the image
+        """
+        if self.tex_data is None and not self._released:  # ensures img_file is set
+            self.tex_data = TextureData(self._load_image(str(self._img_file)))
 
     def _init_texture(self):
         if self.tex is None and not self._released:
@@ -121,8 +127,10 @@ class CtxShot:
         """
         Binds the texture of this object to a texture unit
         """
+        if self._released:
+            raise RuntimeError('Shot cannot be used as it has already been released')
         if self.tex_data is None:
-            self._init_texture_data()
+            self.load_image()
         if self.tex is None:
             self._init_texture()
         self.tex.use()
@@ -187,14 +195,17 @@ class CtxShot:
                 raise ValueError('The given JSON file does not contain valid data')
 
             rot_len = len(rotation)
-            for _ in range(4 - rot_len):
-                rotation.append(0.0)
+            if rot_len == 3:
+                rotation = Quaternion.from_eulers([deg2rad(val) for val in rotation])
+            elif rot_len == 4:
+                rotation = Quaternion(rotation)
+            else:
+                raise ValueError(f'Invalid rotation format of length {rot_len}: {rotation}')
 
             if fov is None:
                 fov = fovy
 
             img_file = f'{image_dir}{PATH_SEP}{img_file}'
 
-            shots.append(CtxShot(ctx, img_file, Vector3(position), Quaternion(rotation), fov, correction=correction, lazy=lazy))
+            shots.append(CtxShot(ctx, img_file, Vector3(position), rotation, fov, correction=correction, lazy=lazy))
         return shots
-
