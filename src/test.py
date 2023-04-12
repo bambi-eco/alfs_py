@@ -6,6 +6,7 @@ import cv2
 import moderngl as mgl
 import numpy as np
 from PIL import Image
+from numpy import deg2rad
 from pyrr import Matrix44, Vector3, Quaternion
 
 from src.core.camera import Camera
@@ -17,12 +18,13 @@ from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
+from src.core.shot_loader import AsyncShotLoader
 from src.core.util.basic import get_center, int_up, make_quad, gen_checkerboard_tex
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import crop_to_content, split_components, integral, overlay, replace_color, laplacian_variance
 from src.core.util.moderngl import img_from_fbo
 
-_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 4, 1024 * 4)
+_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (2109, 4096)  # (1024 * 4, 1024 * 4)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
 
 _FOV: Final[float] = 45.0
@@ -223,12 +225,13 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
 
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
-    ctx.enable(mgl.CULL_FACE)
-    ctx.cull_face = 'back'
+    #ctx.enable(mgl.CULL_FACE)
+    #ctx.cull_face = 'back'
 
-    data_dir = f'{INPUT_DIR}data\\haag\\'
-    gltf_file = f'{data_dir}dem_mesh_r2.glb'
-    json_file = f'{data_dir}poses.json'
+    # data_dir = f'{INPUT_DIR}data\\haag\\'
+    gltf_file = r'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
+    json_file = r'D:\BambiData\Processed\Hagenberg\NeRF Grid\Frames_T\poses.json'
+    mask_file = r'D:\BambiData\Processed\Hagenberg\NeRF Grid\Frames_T\mask_T.png'
 
     print(f'  Reading GLTF file from "[{gltf_file}]')
     mesh_data, texture_data = gltf_extract(gltf_file)
@@ -260,17 +263,26 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
                   f'to fit size restriction of {CPP_INT_MAX} B')
 
     center, aabb = get_center(mesh_data.vertices)
-    center.z = 1
+    center.z += aabb.depth + 1
     ortho_size = int_up(aabb.width), int_up(aabb.height)
     done()
 
     print(f'  Creating context and renderer')
-    camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
+    camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center, far=100000)
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
     done()
 
     print(f'  Extracting shots from JSON (creating lazy shots: {lazy})')
     shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction, lazy=lazy)
+    shot_loader = AsyncShotLoader(shots, 15, 8)
+    done()
+
+    print(f'  Reading mask')
+    mask_img = cv2.imread(mask_file)
+    mask_img = mask_img[..., 0].astype('f4')
+    mask_img = np.resize(mask_img, (*mask_img.shape, 1))
+    mask_img /= 255.0
+    mask = TextureData(mask_img)
     done()
 
     print('  Rendering background')
@@ -280,7 +292,8 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
 
     print(f'  Projecting shots (Mode: {projection_mode}; Render integral: {render_integral}; Release single shots after projection: {release_shots})')
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-    results = renderer.project_shots(shots, projection_mode, integral=render_integral, save=False, save_name_iter=file_name_iter, release_shots=True)
+
+    results = renderer.project_shots(shot_loader, projection_mode, mask=mask, integral=render_integral, save=False, save_name_iter=file_name_iter, release_shots=True)
     done()
 
     if render_integral:
@@ -494,9 +507,12 @@ def test_image_metrics() -> None:
 
 def main() -> None:
 
-    test_projection(1000)
+    correction = Transform()
+    correction.position.z = 2
+    correction.rotation = Quaternion.from_z_rotation(deg2rad(1))
+    test_projection(10000, correction=correction)
 
-    # correction = Transform()
+
     # vals = np.arange(-1, 1.05, 0.1) * 0.08726646
     # for val in vals:
     # correction_rot = Quaternion.from_z_rotation(0.08726646, dtype='f4')

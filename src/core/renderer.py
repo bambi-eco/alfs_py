@@ -235,7 +235,7 @@ class Renderer:
         """
 
         if integral:
-            integral_arr = [np.zeros(self.render_shape, dtype=np.int64)]
+            integral_arr = [np.zeros(self.render_shape, dtype=np.uint64)]
 
             def handle_result(res: NDArray) -> None:
                 integral_arr[0] += res
