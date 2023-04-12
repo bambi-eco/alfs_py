@@ -123,7 +123,7 @@ class CtxShot:
 
             self._released = True
 
-    def tex_use(self) -> None:
+    def tex_use(self, location: int = 0) -> None:
         """
         Binds the texture of this object to a texture unit
         """
@@ -133,7 +133,7 @@ class CtxShot:
             self.load_image()
         if self.tex is None:
             self._init_texture()
-        self.tex.use()
+        self.tex.use(location)
 
     def get_view(self) -> Matrix44:
         """

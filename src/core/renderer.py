@@ -6,7 +6,7 @@ from typing import Final, Optional, Iterable, Union, Iterator, Callable
 
 import cv2
 import numpy as np
-from moderngl import Context, Program, Framebuffer
+from moderngl import Context, Program, Framebuffer, Texture
 from numpy.typing import NDArray
 from pyrr import Matrix44
 
@@ -38,6 +38,7 @@ class Renderer:
     _obj_prog: Final[Program]
     _obj: RenderObject
     _shot_prog: Final[Program]
+    _mask_tex: Optional[Texture]
     mesh_aabb: Final[AABB]
     camera: Camera
 
@@ -67,7 +68,11 @@ class Renderer:
         self.mesh_aabb = get_aabb(mesh.vertices)
 
         self._shot_prog = ctx.program(vertex_shader=self._SHOT_VERT_SHADER, fragment_shader=self._SHOT_FRAG_SHADER)
+        self._shot_prog[self._PAR_TEX] = self._S2_LOC_TEX
+        self._shot_prog[self._PAR_MASK] = self._S2_LOC_MASK
         self._shot = self._get_shot_render_object()
+
+        self._mask_tex = None
 
         self.camera = camera
         self.apply_camera()
@@ -101,6 +106,9 @@ class Renderer:
         Releases all objects associated with the given context
         """
         if not self._released:
+            if self._mask_tex is not None:
+                self._mask_tex.release()
+
             self._obj.release()
             self._fbo.release()
             self._obj_prog.release()
@@ -117,8 +125,19 @@ class Renderer:
         self._obj.render()
         return img_from_fbo(self._fbo)
 
+    def _use_mask(self, mask: Optional[TextureData]):
+        if mask is not None:
+            if self._mask_tex is not None:
+                self._mask_tex.release()
+                del self._mask_tex
+            self._mask_tex = self._ctx.texture(*mask.tex_gen_input(), dtype='f4')
+            self._mask_tex.use(self._S2_LOC_MASK)
+            self._shot_prog[self._PAR_MASK_FLAG].value = self._VAL_TRUE
+        else:
+            self._shot_prog[self._PAR_MASK_FLAG].value = self._VAL_FALSE
+
     def _use_shot(self, shot: CtxShot):
-        shot.tex_use()
+        shot.tex_use(self._S2_LOC_TEX)
         self._shot_prog[self._PAR_SHOT_PROJ].write(shot.get_proj())
         self._shot_prog[self._PAR_SHOT_VIEW].write(shot.get_view())
         self._shot_prog[self._PAR_SHOT_CORRECTION].write(shot.get_correction())
@@ -182,27 +201,31 @@ class Renderer:
         return result
 
     def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
-                           release_shots: bool = False) -> Iterator[NDArray]:
+                           release_shots: bool = False, mask: Optional[TextureData] = None) -> Iterator[NDArray]:
         """
         Projects and renders all passed shots
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
         :param release_shots: Whether shots should be released after projection (defaults to ``False``)
+        :param mask: The mask to be applied to each shot texture (optional)
         :return: An iterator iterating over all performed projections
         """
         if not isinstance(shots, Iterable):
             shots = [shots]
 
+        self._use_mask(mask)
+
         return self._psi_look_up[mode](shots, release_shots)
 
-    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
-                      release_shots: bool = False, integral: bool = False, save: bool = False,
+    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode, release_shots: bool = False,
+                      mask: Optional[TextureData] = None, integral: bool = False, save: bool = False,
                       save_name_iter: Optional[Iterator[str]] = None) -> Optional[Union[NDArray, list[NDArray]]]:
         """
         Projects and renders all passed shots
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
         :param release_shots: Whether shots should be released after projection (defaults to ``False``)
+        :param mask: The mask to be applied to each shot texture (optional)
         :param integral: Whether the result should be the integral of all rendered shots instead of single shot renders
         (defaults to False)
         :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``)
@@ -212,13 +235,13 @@ class Renderer:
         """
 
         if integral:
-            integral_arr = [np.zeros(self.render_shape)]
+            integral_arr = [np.zeros(self.render_shape, dtype=np.int64)]
 
             def handle_result(res: NDArray) -> None:
                 integral_arr[0] += res
                 del res
 
-            for result in self.project_shots_iter(shots, mode, release_shots):
+            for result in self.project_shots_iter(shots, mode, release_shots, mask):
                 handle_result(result)
 
             out = np.zeros(self.render_shape)
@@ -246,7 +269,7 @@ class Renderer:
                 def handle_result(res: NDArray) -> None:
                     results.append(res)
 
-            for result in self.project_shots_iter(shots, mode, release_shots):
+            for result in self.project_shots_iter(shots, mode, release_shots, mask):
                 handle_result(result)
 
             return results
@@ -259,9 +282,17 @@ class Renderer:
     _PAR_VIEW: Final[str] = 'u_m4_view'
     _PAR_MODEL: Final[str] = 'u_m4_model'
     _PAR_TEX: Final[str] = 'u_s2_tex'
+    _PAR_MASK: Final[str] = 'u_s2_mask'
+    _PAR_MASK_FLAG: Final[str] = 'u_f_mask'
     _PAR_SHOT_PROJ: Final[str] = 'u_m4_shot_proj'
     _PAR_SHOT_VIEW: Final[str] = 'u_m4_shot_view'
     _PAR_SHOT_CORRECTION: Final[str] = 'u_m4_shot_correction'
+
+    _VAL_TRUE: Final[float] = 1.0
+    _VAL_FALSE: Final[float] = -1.0
+
+    _S2_LOC_TEX: Final[int] = 0
+    _S2_LOC_MASK: Final[int] = 1
 
     _OBJ_VERT_SHADER: Final[str] = f"""
     #version 330
@@ -320,6 +351,8 @@ class Renderer:
     #version 330
 
     uniform sampler2D {_PAR_TEX};
+    uniform sampler2D {_PAR_MASK};
+    uniform float {_PAR_MASK_FLAG};
 
     in vec4 v_out_v4_shot_uv;
     out vec4 f_out_v4_color;
@@ -333,6 +366,9 @@ class Renderer:
             f_out_v4_color = vec4(0.0, 0.0, 0.0, 0.0);
         }} else {{
             f_out_v4_color = vec4(texture({_PAR_TEX}, uv.xy).rgba);
+            if ({_PAR_MASK_FLAG} > 0.0) {{
+                f_out_v4_color.a *= texture({_PAR_MASK}, uv.xy).r;
+            }}
         }}
     }}
     """
