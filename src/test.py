@@ -217,6 +217,7 @@ class DoneCallback:
 
 
 def test_projection(count: int = 1, show_count: int = -1, projection_mode: ProjectMode = ProjectMode.SHOT_VIEW_RELATIVE,
+                    initial_skip: int = 0, skip: int = 0,
                     lazy: bool = True, render_integral: bool = True, release_shots: bool = True,
                     correction: Optional[Transform] = None, suffix: str = ''):
 
@@ -274,6 +275,7 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
 
     print(f'  Extracting shots from JSON (creating lazy shots: {lazy})')
     shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction, lazy=lazy)
+    shots = shots[initial_skip:]
     shot_loader = AsyncShotLoader(shots, 15, 8)
     done()
 
@@ -509,9 +511,17 @@ def main() -> None:
 
     correction = Transform()
     correction.position.z = 2
-    correction.rotation = Quaternion.from_z_rotation(deg2rad(1))
-    test_projection(10000, correction=correction)
+    correction.rotation = Quaternion.from_z_rotation(deg2rad(1.0), dtype='f4')
+    test_projection(1000, initial_skip=300, correction=correction)
 
+    # integral_arr = np.load(f'{OUTPUT_DIR}integral_np.npy')
+    # integral_arr = integral_arr[0]
+    # alpha = integral_arr[:, :, -1][:, :, np.newaxis]
+    # alpha_mask = (alpha >= 1.0)
+    # out = np.divide(integral_arr, alpha, where=alpha_mask, dtype=np.float64)
+    # result = (out * 255).astype(np.uint8)
+    # im_pil = Image.fromarray(result)
+    # im_pil.show('Integral')
 
     # vals = np.arange(-1, 1.05, 0.1) * 0.08726646
     # for val in vals:
