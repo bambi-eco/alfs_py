@@ -29,6 +29,15 @@ class ProjectMode(Enum):
     def __str__(self):
         return self.name
 
+class _IntegralSumCallback:
+    def __init__(self, shape: Union[int, Iterable, tuple[int]], dtype: Optional[object] = np.uint64):
+        self.sum = np.zeros(shape, dtype=dtype)
+
+    def __call__(self, arr: NDArray) -> None:
+        self.sum += arr
+        # print(' | '.join([str(arr.shape), str(arr.max(initial=0)), str(arr.min(initial=255))]))
+        del arr
+
 
 class Renderer:
     _released: bool
@@ -235,22 +244,16 @@ class Renderer:
         """
 
         if integral:
-            integral_arr = [np.zeros(self.render_shape, dtype=np.uint64)]
-
-            def handle_result(res: NDArray) -> None:
-                integral_arr[0] += res
-                del res
+            handle_result = _IntegralSumCallback(self.render_shape, dtype=np.uint64)
 
             for result in self.project_shots_iter(shots, mode, release_shots, mask):
                 handle_result(result)
 
-            np.save(f'{OUTPUT_DIR}integral_np.npy', integral_arr)
+            integral_arr = handle_result.sum
 
-            integral_arr = integral_arr[0]
-            out = np.zeros(integral_arr[0].shape, dtype=np.float64)
             alpha = integral_arr[:, :, -1][:, :, np.newaxis]
             alpha_mask = (alpha >= 1.0)
-            np.divide(integral_arr, alpha, out=out, where=alpha_mask)
+            out = np.divide(integral_arr, alpha, where=alpha_mask, dtype=np.float64)
             result = (out * 255).astype(np.uint8)
 
             del integral_arr
