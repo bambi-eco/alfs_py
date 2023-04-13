@@ -13,7 +13,7 @@ from pyrr import Matrix44
 from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject, AABB
 from src.core.decorators import incomplete
-from src.core.defs import TRANSPARENT, BLACK, MAGENTA
+from src.core.defs import TRANSPARENT, BLACK, MAGENTA, OUTPUT_DIR
 from src.core.geo.frustum import Frustum
 from src.core.shot import CtxShot
 from src.core.util.basic import gen_checkerboard_tex, get_center, int_up, get_aabb
@@ -244,12 +244,17 @@ class Renderer:
             for result in self.project_shots_iter(shots, mode, release_shots, mask):
                 handle_result(result)
 
-            out = np.zeros(self.render_shape)
-            integral_result = integral_arr[0]
-            alpha = integral_result[:, :, -1][:, :, np.newaxis]
-            mask = (alpha >= 1.0)
-            result = np.divide(integral_result, alpha, out=out, where=mask)
-            result = (result * 255).astype(np.uint8)
+            np.save(f'{OUTPUT_DIR}integral_np.npy', integral_arr)
+
+            integral_arr = integral_arr[0]
+            out = np.zeros(integral_arr[0].shape, dtype=np.float64)
+            alpha = integral_arr[:, :, -1][:, :, np.newaxis]
+            alpha_mask = (alpha >= 1.0)
+            np.divide(integral_arr, alpha, out=out, where=alpha_mask)
+            result = (out * 255).astype(np.uint8)
+
+            del integral_arr
+            del out
 
             if save:
                 cv2.imwrite(next(save_name_iter), result)
