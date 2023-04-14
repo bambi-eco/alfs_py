@@ -252,8 +252,8 @@ class Renderer:
             integral_arr = handle_result.sum
 
             alpha = integral_arr[:, :, -1][:, :, np.newaxis]
-            alpha_mask = (alpha >= 1.0)
-            out = np.divide(integral_arr, alpha, where=alpha_mask, dtype=np.float64)
+            alpha_mask = (alpha > 0.0)
+            out = np.divide(integral_arr, alpha, where=alpha_mask)
             result = (out * 255).astype(np.uint8)
 
             del integral_arr
@@ -351,7 +351,6 @@ class Renderer:
         vec4 world_pos = {_PAR_MODEL} * vec4({_PAR_POS}.xyz, 1.0);
         gl_Position = {_PAR_PROJ} * {_PAR_VIEW} *  world_pos;
         v_out_v4_shot_uv = {_PAR_SHOT_PROJ} * {_PAR_SHOT_CORRECTION} * {_PAR_SHOT_VIEW}  * world_pos;
-        // * {_PAR_SHOT_CORRECTION};
     }}
     """
 

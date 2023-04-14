@@ -42,6 +42,7 @@ class TextureData:
         img = self.texture
         if img.max(initial=0.0) > 1.0:
             img = self.texture / 255.0
+        img = img[::-1, ...]  # flip image vertically for moderngl
         return img.astype('f4').tobytes()
 
     def tex_gen_input(self) -> tuple[tuple[int, int], int, bytes]:

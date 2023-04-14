@@ -76,7 +76,6 @@ class CtxShot:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-        img = img[:, ::-1, ...]  # flip image horizontally for projection
         img = img.astype('f4')
         return img
 
@@ -96,10 +95,9 @@ class CtxShot:
         """
         :return: A copy of the picture associated with the shot
         """
-        if self.tex_data is not None:
-            return self.tex_data.texture.copy()
-        else:
-            return None
+        if self.tex_data is None:
+            self.load_image()
+        return self.tex_data.texture.copy()
 
     def get_proj(self) -> Matrix44:
         """

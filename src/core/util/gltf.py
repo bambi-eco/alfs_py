@@ -75,6 +75,7 @@ def gltf_to_texture_data(gltf: GLTF) -> Optional[TextureData]:
     with urlopen(uri) as resp:
         data = resp.read()
     texture = bytes_to_img(data)
+    texture = texture[::-1, ...]  # texture is extracted horizontally flipped
     return TextureData(texture) if texture is not None else None
 
 

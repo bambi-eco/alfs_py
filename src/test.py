@@ -18,7 +18,7 @@ from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
-from src.core.shot_loader import AsyncShotLoader
+from src.core.shot_loader import AsyncShotLoader, SyncShotLoader
 from src.core.util.basic import get_center, int_up, make_quad, gen_checkerboard_tex
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import crop_to_content, split_components, integral, overlay, replace_color, laplacian_variance
@@ -217,7 +217,7 @@ class DoneCallback:
 
 
 def test_projection(count: int = 1, show_count: int = -1, projection_mode: ProjectMode = ProjectMode.SHOT_VIEW_RELATIVE,
-                    initial_skip: int = 0, skip: int = 0,
+                    initial_skip: int = 0, skip: int = 1,
                     lazy: bool = True, render_integral: bool = True, release_shots: bool = True,
                     correction: Optional[Transform] = None, suffix: str = ''):
 
@@ -226,8 +226,8 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
 
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
-    #ctx.enable(mgl.CULL_FACE)
-    #ctx.cull_face = 'back'
+    ctx.enable(mgl.CULL_FACE)
+    ctx.cull_face = 'back'
 
     # data_dir = f'{INPUT_DIR}data\\haag\\'
     gltf_file = r'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
@@ -264,7 +264,7 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
                   f'to fit size restriction of {CPP_INT_MAX} B')
 
     center, aabb = get_center(mesh_data.vertices)
-    center.z += aabb.depth + 1
+    center.z += aabb.depth + 100
     ortho_size = int_up(aabb.width), int_up(aabb.height)
     done()
 
@@ -275,7 +275,8 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
 
     print(f'  Extracting shots from JSON (creating lazy shots: {lazy})')
     shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction, lazy=lazy)
-    shots = shots[initial_skip:]
+    shots = shots[initial_skip::skip]
+    # shot_loader = SyncShotLoader(shots)
     shot_loader = AsyncShotLoader(shots, 15, 8)
     done()
 
@@ -512,7 +513,7 @@ def main() -> None:
     correction = Transform()
     correction.position.z = 2
     correction.rotation = Quaternion.from_z_rotation(deg2rad(1.0), dtype='f4')
-    test_projection(1000, initial_skip=300, correction=correction)
+    test_projection(10000, initial_skip=0, correction=correction)
 
     # integral_arr = np.load(f'{OUTPUT_DIR}integral_np.npy')
     # integral_arr = integral_arr[0]
