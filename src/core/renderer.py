@@ -13,7 +13,7 @@ from pyrr import Matrix44
 from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject, AABB
 from src.core.decorators import incomplete
-from src.core.defs import TRANSPARENT, BLACK, MAGENTA, OUTPUT_DIR
+from src.core.defs import TRANSPARENT, BLACK, MAGENTA
 from src.core.geo.frustum import Frustum
 from src.core.shot import CtxShot
 from src.core.util.basic import gen_checkerboard_tex, get_center, int_up, get_aabb

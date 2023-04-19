@@ -7,6 +7,8 @@ from moderngl import VertexArray, Buffer, Texture, Program
 from numpy.typing import NDArray
 from pyrr import Vector3
 
+from src.core.geo.transform import Transform
+
 
 @dataclass
 class MeshData:
@@ -215,3 +217,24 @@ class AABB:
             Vector3([min_x, max_y, min_z]), Vector3([min_x, max_y, max_z]), \
             Vector3([max_x, min_y, min_z]), Vector3([max_x, min_y, max_z]), \
             Vector3([max_x, max_y, min_z]), Vector3([max_x, max_y, max_z])
+
+
+@dataclass
+class ProjectionSettings:
+    """
+    Class storing settings used by the projection process
+    :cvar count: The max amount of shots to be used
+    :cvar initial_skip: The number of shots read from the JSON file to be skipped from the beginning
+    :cvar skip: The number of shots to be skipped after every shot projection
+    :cvar lazy: Whether the shots should be loaded lazy
+    :cvar release_shots: Whether the renderer should release shots as soon as he used them
+    :cvar correction: The correction to be applied to every single shot
+    :cvar output_file: The path and name of the output to be generated
+    """
+    count: int = 1
+    initial_skip: int = 0
+    skip: int = 1
+    lazy: bool = True
+    release_shots: bool = True
+    correction: Optional[Transform] = None
+    output_file: str = ''

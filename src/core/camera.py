@@ -108,7 +108,7 @@ class Camera:
     @orthogonal.setter
     def orthogonal(self, orthogonal: bool) -> None:
         """
-        Sets the whether the camera is orthogonal
+        Sets whether the camera is orthogonal
         :param orthogonal: The new value
         """
         self._frustum.orthogonal = orthogonal

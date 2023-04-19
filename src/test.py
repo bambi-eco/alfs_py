@@ -8,9 +8,8 @@ from PIL import Image
 from pyrr import Matrix44, Vector3, Quaternion
 
 from src.core.camera import Camera
-from src.core.data import TextureData
-from src.core.defs import OUTPUT_DIR, INPUT_DIR, COL_VERT_SHADER_PATH, COL_FRAG_SHADER_PATH, \
-    TEX_VERT_SHADER_PATH, TEX_FRAG_SHADER_PATH, DEF_FRAG_SHADER_PATH, \
+from src.core.data import TextureData, ProjectionSettings
+from src.core.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, CPP_INT_MAX, MAGENTA, BLACK, MAX_TEX_DIM
 from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
@@ -43,24 +42,26 @@ class DoneCallback:
         self.last = current
 
 
-def test_projection(count: int = 1, show_count: int = -1, projection_mode: ProjectMode = ProjectMode.SHOT_VIEW_RELATIVE,
-                    initial_skip: int = 0, skip: int = 1,
-                    lazy: bool = True, render_integral: bool = True, release_shots: bool = True,
-                    correction: Optional[Transform] = None, suffix: str = ''):
+def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = None, settings: Optional[ProjectionSettings] = None):
     done = DoneCallback()
     print('Start projection process')
 
+    count = settings.count
+    initial_skip = settings.initial_skip
+    skip = settings.skip
+    lazy = settings.lazy
+    release_shots = settings.release_shots
+    correction = settings.correction
+    output_file = settings.output_file
+
+    print('    Creating MGL context')
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
     ctx.enable(mgl.CULL_FACE)
     ctx.cull_face = 'back'
+    done()
 
-    # data_dir = f'{INPUT_DIR}data\\haag\\'
-    gltf_file = r'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
-    json_file = r'D:\BambiData\Processed\Hagenberg\NeRF Grid\Frames_T\poses.json'
-    mask_file = r'D:\BambiData\Processed\Hagenberg\NeRF Grid\Frames_T\mask_T.png'
-
-    print(f'  Reading GLTF file from "[{gltf_file}]')
+    print(f'  Reading GLTF file from "{gltf_file}"')
     mesh_data, texture_data = gltf_extract(gltf_file)
 
     if mesh_data is None:
@@ -99,67 +100,44 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
     renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
     done()
 
-    print(f'  Extracting shots from JSON (creating lazy shots: {lazy})')
-    shots = CtxShot.from_json(json_file, ctx, count=count, correction=correction, lazy=lazy)
+    print(f'  Extracting shots from "{json_file}" (Creating lazy shots: {lazy})')
+    shots = CtxShot.from_json(json_file, ctx, count=count + initial_skip, correction=correction, lazy=lazy)
     shots = shots[initial_skip::skip]
     # shot_loader = SyncShotLoader(shots)
     shot_loader = AsyncShotLoader(shots, 15, 8)
     done()
 
-    print(f'  Reading mask')
-    mask_img = cv2.imread(mask_file)
-    mask_img = mask_img[..., 0].astype('f4')
-    mask_img = np.resize(mask_img, (*mask_img.shape, 1))
-    mask_img /= 255.0
-    mask = TextureData(mask_img)
-    done()
+    if mask_file is not None:
+        print(f'  Reading mask from "{mask_file}"')
+        mask_img = cv2.imread(mask_file)
+        mask_img = mask_img[..., 0].astype('f4')
+        mask_img = np.resize(mask_img, (*mask_img.shape, 1))
+        mask_img /= 255.0
+        mask = TextureData(mask_img)
+        done()
+    else:
+        mask = None
 
     print('  Rendering background')
     background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
     cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     done()
 
-    print(
-        f'  Projecting shots (Mode: {projection_mode}; Render integral: {render_integral}; Release single shots after projection: {release_shots})')
-    file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-
-    results = renderer.project_shots(shot_loader, projection_mode, mask=mask, integral=render_integral, save=False,
-                                     save_name_iter=file_name_iter, release_shots=True)
+    print(f'  Projecting shots (Releasing shots after projection: {release_shots})')
+    results = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
+                                     release_shots=True)
     done()
 
-    if render_integral:
-        print('  Showing integral')
-        result = results
-        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
-        img = overlay(background, img)
-        im_pil = Image.fromarray(img)
-        im_pil.show('Integral')
-        done()
-    else:
-        if show_count > 0:
-            print(f'  Showing {show_count} individual results')
-            for i, result in enumerate(results[:show_count]):
-                # img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
-                # im_pil = Image.fromarray(img)
-                # im_pil.show(f'Shot {i}')
-                cv2.imwrite(f'{OUTPUT_DIR}proj/{i}.png', result)
-            done()
+    print('  Showing integral')
+    result = results
+    img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+    img = overlay(background, img)
+    im_pil = Image.fromarray(img)
+    im_pil.show('Integral')
+    done()
 
-        print('  Computing integral')
-        result = integral(results)
-        done()
-
-        print('  Processing and showing integral')
-        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
-        img = replace_color(img, (0, 0, 0, 255), (0, 0, 0, 0), True)
-        cv2.imwrite(f'{OUTPUT_DIR}integral{suffix}.png', cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA))
-        img = overlay(background, img)
-        im_pil = Image.fromarray(img)
-        im_pil.show('Integral')
-        done()
-
-    print('  Saving integral image')
-    im_pil.save(f'{OUTPUT_DIR}integral.png')
+    print(f'  Saving integral image to "{output_file}"')
+    im_pil.save(output_file)
     done()
 
     print('  Release all resources')
@@ -311,10 +289,20 @@ def test_fit_to_points(count: int = 1):
 
 
 def main() -> None:
+    bambi_data_dir = 'D:\\BambiData\\'
+    gltf_file = rf'{bambi_data_dir}DEM\Hagenberg\dem_mesh_r2.glb'
+    json_file = rf'{bambi_data_dir}Processed\Hagenberg\NeRF Grid\Frames_T\poses.json'
+    mask_file = rf'{bambi_data_dir}Processed\Hagenberg\NeRF Grid\Frames_T\mask_T.png'
+
     correction = Transform()
     correction.position.z = 2
     correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
-    test_projection(2, initial_skip=0, correction=correction)
+
+    output_file = f'{OUTPUT_DIR}integral.png'
+
+    settings = ProjectionSettings(count=2, initial_skip=0, correction=correction, output_file=output_file)
+
+    test_projection(gltf_file, json_file, mask_file, settings)
 
     # vals = np.arange(-1, 1.05, 0.1) * 0.08726646
     # for val in vals:
