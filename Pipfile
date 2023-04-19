@@ -9,7 +9,6 @@ matplotlib="*"
 moderngl="*"
 opencv-python="*"
 gltflib = "*"
-attrs = "*"
 pyrr = "*"
 
 [dev-packages]

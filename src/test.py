@@ -1,4 +1,3 @@
-import glob
 import time
 from typing import Final, Optional
 
@@ -6,7 +5,6 @@ import cv2
 import moderngl as mgl
 import numpy as np
 from PIL import Image
-from numpy import deg2rad
 from pyrr import Matrix44, Vector3, Quaternion
 
 from src.core.camera import Camera
@@ -18,8 +16,8 @@ from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
 from src.core.shot import CtxShot
-from src.core.shot_loader import AsyncShotLoader, SyncShotLoader
-from src.core.util.basic import get_center, int_up, make_quad, gen_checkerboard_tex
+from src.core.shot_loader import AsyncShotLoader
+from src.core.util.basic import get_center, int_up, make_quad, gen_checkerboard_tex, get_vector_center
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import crop_to_content, split_components, integral, overlay, replace_color, laplacian_variance
 from src.core.util.moderngl import img_from_fbo
@@ -30,177 +28,6 @@ _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
 _FOV: Final[float] = 45.0
 _NEAR_CLIP: Final[float] = 0.1
 _FAR_CLIP: Final[float] = 10000.0
-
-
-def draw_rand_tris(n: int) -> None:
-    ctx = mgl.create_context(standalone=True)
-
-    with open(COL_VERT_SHADER_PATH) as file:
-        vert_shader = file.read()
-
-    with open(COL_FRAG_SHADER_PATH) as file:
-        frag_shader = file.read()
-
-    prog = ctx.program(vertex_shader=vert_shader, fragment_shader=frag_shader)
-    fbo = ctx.simple_framebuffer(_OUTPUT_RESOLUTION, components=4)
-    fbo.use()
-
-    tri_count = 10
-    vert_count = tri_count * 3
-
-    vbo = ctx.buffer(reserve=7 * 4 * vert_count)
-    vao = ctx.vertex_array(prog, [(vbo, '3f4 4f4', 'in_vert', 'in_color')])
-
-    for i in range(n):
-        x = np.random.rand(vert_count) * 2 - 1
-        y = np.random.rand(vert_count) * 2 - 1
-        z = np.zeros(vert_count)
-        r = np.random.rand(vert_count)
-        g = np.random.rand(vert_count)
-        b = np.random.rand(vert_count)
-        a = np.ones(vert_count)
-
-        vertices = np.dstack([x, y, z, r, g, b, a])
-        vbo.write(vertices.astype('f4').tobytes())
-
-        fbo.clear(*_CLEAR_COLOR)
-        vao.render(mgl.TRIANGLES)
-
-        render_result = img_from_fbo(fbo)
-        file_path = f'{OUTPUT_DIR}render_{i}.png'
-        cv2.imwrite(file_path, render_result)
-
-    vao.release()
-    vbo.release()
-    fbo.release()
-    prog.release()
-    ctx.release()
-
-
-def gltf_lib_test() -> None:
-    file = f'{INPUT_DIR}mesh.glb'
-
-    mesh_data, tex_data = gltf_extract(file)
-
-    vertices = mesh_data.vertices
-    indices = mesh_data.indices
-    uvs = mesh_data.uvs
-
-    center, _ = get_center(vertices)
-    x_tsl, y_tsl, _ = center
-
-    camera = Camera(orthogonal=False, orthogonal_size=(1024, 1024), position=Vector3([0, 0, 750]))
-    camera.look_at(Vector3([0, 0, 0]))
-
-    projection = camera.get_proj()
-    view = camera.get_view()
-
-    model = Matrix44.from_translation([x_tsl, y_tsl, -5], dtype='f4')
-
-    ctx = mgl.create_context(standalone=True)
-    ctx.enable(mgl.DEPTH_TEST)
-
-    with open(TEX_VERT_SHADER_PATH) as file:
-        vert_shader = file.read()
-    with open(TEX_FRAG_SHADER_PATH) as file:
-        frag_shader = file.read()
-    prog = ctx.program(vertex_shader=vert_shader, fragment_shader=frag_shader)
-
-    prog['projection'].write(projection)
-    prog['view'].write(view)
-    prog['model'].write(model)
-
-    fbo = ctx.simple_framebuffer(_OUTPUT_RESOLUTION, components=4)
-    fbo.use()
-
-    tex_input = tex_data.tex_gen_input()
-    tex = ctx.texture(*tex_input, dtype='f4')
-    tex.use()
-
-    vbo = ctx.buffer(reserve=5 * 4 * vertices.shape[0])
-    ibo = ctx.buffer(indices.tobytes())
-    vao = ctx.vertex_array(prog, [(vbo, '3f4 2f4', 'v_in_v3_pos', 'v_in_v2_uv')], index_buffer=ibo,
-                           index_element_size=4)
-    # vao = ctx.vertex_array(prog, [(vetices, '3f4 2f4', 'pos_in', 'uv_cord_in')])
-
-    x, y, z = split_components(vertices)
-    u, v = split_components(uvs)
-
-    shader_data = np.dstack([x, y, z, u, v])
-    vbo.write(shader_data.astype('f4').tobytes())
-
-    fbo.clear(*_CLEAR_COLOR)
-    vao.render(mgl.TRIANGLES)
-
-    render_result = img_from_fbo(fbo)
-    file_path = f'{OUTPUT_DIR}render_mesh.png'
-    cv2.imwrite(file_path, render_result)
-
-    print()
-
-    for releasable in (tex, vao, vbo, fbo, prog, ctx):
-        releasable.release()
-
-
-def test_lines():
-    vertices = np.array([
-        [0.0, 0.5, -1.0],
-        [0.5, -0.5, -1.0],
-        [-0.5, -0.5, -1.0],
-    ], dtype='f4')
-
-    col = np.array([
-        [0.0, 1.0, 1.0],
-        [1.0, 0.0, 1.0],
-        [1.0, 1.0, 0.0],
-    ], dtype='f4')
-
-    ctx = mgl.create_context(standalone=True)
-
-    with open(COL_VERT_SHADER_PATH) as file:
-        vert_shader = file.read()
-
-    with open(COL_FRAG_SHADER_PATH) as file:
-        frag_shader = file.read()
-
-    prog = ctx.program(vertex_shader=vert_shader, fragment_shader=frag_shader)
-    fbo = ctx.simple_framebuffer(_OUTPUT_RESOLUTION, components=4)
-    fbo.use()
-
-    x, y, z = split_components(vertices)
-    r, g, b = split_components(col)
-    a = np.ones(x.shape)
-    shader_data = np.dstack([x, y, z, r, g, b, a])
-    vbo = ctx.buffer(shader_data.astype('f4').tobytes())
-    vao = ctx.vertex_array(prog, [(vbo, '3f4 4f4', 'in_vert', 'in_color')])
-
-    fbo.clear(*_CLEAR_COLOR)
-    vao.render(mgl.LINE_LOOP)
-
-    render_result = img_from_fbo(fbo)
-    file_path = f'{OUTPUT_DIR}render_line.png'
-    cv2.imwrite(file_path, render_result)
-
-    vao.release()
-    vbo.release()
-    fbo.release()
-    prog.release()
-    ctx.release()
-
-
-def test_crop_to_content():
-    img = cv2.imread(f'{INPUT_DIR}asym_crate.png')
-    img, delta = crop_to_content(img, True)
-    height, width = img.shape[0:2]
-    old_center = (int(width / 2 + delta.x), int(height / 2 + delta.y))
-    new_center = (width // 2, height // 2)
-    cv2.circle(img, new_center, 7, (255, 255, 0), -1)
-    cv2.arrowedLine(img, old_center, new_center, (255, 0, 255), 2)
-    cv2.circle(img, old_center, 7, (0, 255, 255), -1)
-    cv2.imshow('img', img)
-    cv2.waitKey()
-    cv2.destroyAllWindows()
-    cv2.imwrite(f'{OUTPUT_DIR}crop.png', img)
 
 
 class DoneCallback:
@@ -220,7 +47,6 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
                     initial_skip: int = 0, skip: int = 1,
                     lazy: bool = True, render_integral: bool = True, release_shots: bool = True,
                     correction: Optional[Transform] = None, suffix: str = ''):
-
     done = DoneCallback()
     print('Start projection process')
 
@@ -293,10 +119,12 @@ def test_projection(count: int = 1, show_count: int = -1, projection_mode: Proje
     cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     done()
 
-    print(f'  Projecting shots (Mode: {projection_mode}; Render integral: {render_integral}; Release single shots after projection: {release_shots})')
+    print(
+        f'  Projecting shots (Mode: {projection_mode}; Render integral: {render_integral}; Release single shots after projection: {release_shots})')
     file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
 
-    results = renderer.project_shots(shot_loader, projection_mode, mask=mask, integral=render_integral, save=False, save_name_iter=file_name_iter, release_shots=True)
+    results = renderer.project_shots(shot_loader, projection_mode, mask=mask, integral=render_integral, save=False,
+                                     save_name_iter=file_name_iter, release_shots=True)
     done()
 
     if render_integral:
@@ -482,47 +310,11 @@ def test_fit_to_points(count: int = 1):
     ctx.release()
 
 
-def test_load_all_images(img_dir: str) -> None:
-    files = glob.glob(f'{img_dir}*.png')
-
-    file_arr = []
-    for file in files:
-        img = cv2.imread(file)
-        file_arr.append(img)
-
-
-def test_image_metrics() -> None:
-    prefix = f'{OUTPUT_DIR}integral'
-    suffix = '.png'
-    files = glob.glob(f'{prefix}*{suffix}')
-    files = [file.split(prefix)[1].split(suffix)[0] for file in files]
-
-    files = sorted(files, key=lambda x: int(x))
-    for file in files:
-        full_file = prefix + file + suffix
-        img = cv2.imread(full_file)
-        img = crop_to_content(img)
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
-        # laplacian = cv2.Laplacian(img, cv2.CV_64F)
-        variance = laplacian_variance(img)
-        print(f'{file}: {variance:.3f}')
-
-
 def main() -> None:
-
     correction = Transform()
     correction.position.z = 2
-    correction.rotation = Quaternion.from_z_rotation(deg2rad(1.0), dtype='f4')
-    test_projection(10000, initial_skip=0, correction=correction)
-
-    # integral_arr = np.load(f'{OUTPUT_DIR}integral_np.npy')
-    # integral_arr = integral_arr[0]
-    # alpha = integral_arr[:, :, -1][:, :, np.newaxis]
-    # alpha_mask = (alpha >= 1.0)
-    # out = np.divide(integral_arr, alpha, where=alpha_mask, dtype=np.float64)
-    # result = (out * 255).astype(np.uint8)
-    # im_pil = Image.fromarray(result)
-    # im_pil.show('Integral')
+    correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
+    test_projection(2, initial_skip=0, correction=correction)
 
     # vals = np.arange(-1, 1.05, 0.1) * 0.08726646
     # for val in vals:
@@ -530,8 +322,6 @@ def main() -> None:
     # correction.rotation = correction_rot
     # test_projection(100, 0, ProjectMode.SHOT_VIEW_RELATIVE, correction, f'{0.08726646*1000:.0f}')
     # test_load_all_images(f'{INPUT_DIR}data\\haag\\')
-
-    # test_image_metrics()
 
 
 if __name__ == '__main__':

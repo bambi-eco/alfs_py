@@ -1,9 +1,8 @@
 from statistics import fmean
-from typing import Union, Optional, Iterable, Any, Collection
+from typing import Union, Optional, Iterable, Any, Collection, Sequence
 
 import cv2
 import numpy as np
-from moderngl import Framebuffer
 from numpy import ndarray
 from numpy.typing import NDArray
 from pyrr import Vector3
@@ -69,6 +68,17 @@ def get_center(vertices: NDArray) -> tuple[Vector3, AABB]:
 
     center = Vector3((min_x + dhx, min_y + dhy, min_z + dhz))
     return center, aabb
+
+def get_vector_center(vectors: Sequence[Vector3]) -> Vector3:
+    """
+    Computes the center point of the given point cloud, i.e., the average vector of the given vector sequence
+    :param vectors: The vector sequence
+    :return: The average vector
+    """
+    count = len(vectors)
+    vec_sum = np.sum(vectors, axis=0)
+    vec_avg = vec_sum / count
+    return Vector3(vec_avg)
 
 
 def make_plane(size: float = 1.0, y: float = 0.0) -> MeshData:

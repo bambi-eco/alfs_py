@@ -1,14 +1,14 @@
+from dataclasses import dataclass
 from typing import Optional, Any
 
 import cv2
 import numpy as np
-from attr import define, dataclass
 from moderngl import VertexArray, Buffer, Texture, Program
 from numpy.typing import NDArray
 from pyrr import Vector3
 
 
-@define
+@dataclass
 class MeshData:
     """
     Class that represents the most basic information of a mesh for rendering
@@ -16,13 +16,12 @@ class MeshData:
     :cvar indices: The indices of the mesh as a numpy array (optional)
     :cvar uvs: The uvs coordinates of the vertices (optional)
     """
-
     vertices: NDArray
     indices: Optional[NDArray]
     uvs: Optional[NDArray]
 
 
-@define
+@dataclass
 class TextureData:
     """
     Class that represents a texture
@@ -31,7 +30,6 @@ class TextureData:
         to_tex_bytes (bytes): Returns a byte representation of the held texture
         text_gen_input (tuple[tuple[int, int], int, bytes]):
     """
-
     texture: NDArray
 
     def to_bytes(self) -> bytes:
@@ -84,8 +82,6 @@ class TextureData:
         n_height = np.sqrt(size/(ratio*channels*byte_depth))
         n_width = n_height * ratio
         self.texture = cv2.resize(self.texture, (int(n_height), int(n_width)))
-
-
 
 @dataclass
 class RenderObject:
@@ -154,13 +150,13 @@ class RenderObject:
         vertex_buf = ctx.buffer(mesh.vertices.tobytes())
         vao_content.append((vertex_buf, '3f4', vert_par))
 
-        if MeshData.uvs is not None:
+        if mesh.uvs is not None:
             uv_buf = ctx.buffer(mesh.uvs.tobytes())
             vao_content.append((uv_buf, '2f4', uv_par))
         else:
             uv_buf = None
 
-        if MeshData.indices is not None:
+        if mesh.indices is not None:
             ibo = ctx.buffer(mesh.indices.tobytes())
             vao = ctx.vertex_array(prog, vao_content, index_buffer=ibo, index_element_size=4)
         else:
