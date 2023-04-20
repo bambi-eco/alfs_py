@@ -15,7 +15,7 @@ class Camera:
 
     def __init__(self, fovy: float = 60.0, aspect_ratio: float = 1.0,
                  orthogonal: bool = False,
-                 orthogonal_size: tuple[int, int] = (16, 16),
+                 orthogonal_size: tuple[float, float] = (16, 16),
                  near: float = 0.1, far: float = 10000,
                  position: Vector3 = Vector3([0.0, 0.0, 0.0]),
                  rotation: Optional[Quaternion] = None,

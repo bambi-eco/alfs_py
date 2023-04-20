@@ -1,3 +1,4 @@
+import os
 import time
 from typing import Final, Optional
 
@@ -8,9 +9,10 @@ from PIL import Image
 from pyrr import Matrix44, Vector3, Quaternion
 
 from src.core.camera import Camera
-from src.core.data import TextureData, ProjectionSettings
+from src.core.data import TextureData, ProjectionSettings, FocusAnimationSettings
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
-    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, CPP_INT_MAX, MAGENTA, BLACK, MAX_TEX_DIM
+    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, CPP_INT_MAX, MAGENTA, BLACK, \
+    MAX_TEX_DIM, PATH_SEP
 from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
 from src.core.renderer import Renderer, ProjectMode
@@ -18,10 +20,11 @@ from src.core.shot import CtxShot
 from src.core.shot_loader import AsyncShotLoader
 from src.core.util.basic import get_center, int_up, make_quad, gen_checkerboard_tex, get_vector_center
 from src.core.util.gltf import gltf_extract
-from src.core.util.image import crop_to_content, split_components, integral, overlay, replace_color, laplacian_variance
+from src.core.util.image import crop_to_content, split_components, overlay
 from src.core.util.moderngl import img_from_fbo
+from src.core.util.video import video_from_images
 
-_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (2109, 4096)  # (1024 * 4, 1024 * 4)
+_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)  # (1024 * 4, 1024 * 4)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
 
 _FOV: Final[float] = 45.0
@@ -31,27 +34,39 @@ _FAR_CLIP: Final[float] = 10000.0
 
 class DoneCallback:
 
-    def __init__(self):
+    def __init__(self, indent: Optional[str] = None):
+        self.indent = indent if indent is not None else ''
         self.start = time.time()
         self.last = self.start
 
     def __call__(self, print_msg: bool = True):
         current = time.time()
         if print_msg:
-            print(f'    Done [{(current - self.last) * 1000:.3f} ms]')
+            print(f'{self.indent}Done [{(current - self.last) * 1000:.3f} ms]')
         self.last = current
 
+    def all_done(self, print_msg: bool = True):
+        current = time.time()
+        if print_msg:
+            print(f'All Done [{(current - self.start) * 1000:.3f} ms]')
+        self.start = current
 
-def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = None, settings: Optional[ProjectionSettings] = None):
-    done = DoneCallback()
+
+def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = None,
+                    settings: Optional[ProjectionSettings] = None):
+    done = DoneCallback('    ')
     print('Start projection process')
 
     count = settings.count
     initial_skip = settings.initial_skip
     skip = settings.skip
     lazy = settings.lazy
+    shot_centered_camera = settings.shot_centered_camera
+    resolution = settings.resolution
+    ortho_size = settings.ortho_size
     release_shots = settings.release_shots
     correction = settings.correction
+    show_integral = settings.show_integral
     output_file = settings.output_file
 
     print('    Creating MGL context')
@@ -92,12 +107,12 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
 
     center, aabb = get_center(mesh_data.vertices)
     center.z += aabb.depth + 100
-    ortho_size = int_up(aabb.width), int_up(aabb.height)
+    ortho_size = ortho_size if ortho_size is not None else (int_up(aabb.width), int_up(aabb.height))
     done()
 
     print(f'  Creating context and renderer')
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center, far=100000)
-    renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
+    renderer = Renderer(resolution, ctx, camera, mesh_data, texture_data)
     done()
 
     print(f'  Extracting shots from "{json_file}" (Creating lazy shots: {lazy})')
@@ -106,6 +121,14 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
     # shot_loader = SyncShotLoader(shots)
     shot_loader = AsyncShotLoader(shots, 15, 8)
     done()
+
+    if shot_centered_camera:
+        print('  Centering camera on shots')
+        shot_center = get_vector_center([shot.camera.transform.position for shot in shots])
+        camera.transform.position.x = shot_center.x
+        camera.transform.position.y = shot_center.y
+        renderer.apply_camera()
+        done()
 
     if mask_file is not None:
         print(f'  Reading mask from "{mask_file}"')
@@ -124,19 +147,24 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
     done()
 
     print(f'  Projecting shots (Releasing shots after projection: {release_shots})')
-    results = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
-                                     release_shots=True)
+    result = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
+                                     release_shots=release_shots)
     done()
 
-    print('  Showing integral')
-    result = results
+    print('  Laying integral over background')
     img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
     img = overlay(background, img)
     im_pil = Image.fromarray(img)
-    im_pil.show('Integral')
     done()
 
+    if show_integral:
+        print('  Showing integral')
+        im_pil.show('Integral')
+        done()
+
     print(f'  Saving integral image to "{output_file}"')
+    if '.' not in output_file:
+        output_file += '.png'
     im_pil.save(output_file)
     done()
 
@@ -148,6 +176,156 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
     ctx.release()
     done()
 
+    done.all_done()
+
+
+def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str] = None,
+                         min_focus: float = 0.0, max_focus: float = 5.0, frame_count: int = 3600,
+                         settings: Optional[FocusAnimationSettings] = None) -> None:
+    done = DoneCallback('    ')
+    print('Start focus animation process')
+
+    print('    Initializing')
+    if settings is None:
+        settings = ProjectionSettings()
+    if settings.correction is None:
+        settings.correction = Transform()
+        settings.correction.position.z = min_focus
+
+    count = settings.count
+    initial_skip = settings.initial_skip
+    skip = settings.skip
+    lazy = settings.lazy
+    shot_centered_camera = settings.shot_centered_camera
+    resolution = settings.resolution
+    ortho_size = settings.ortho_size
+    release_shots = settings.release_shots
+    correction = settings.correction
+    frame_dir = settings.frame_dir
+    delete_frames = settings.delete_frames
+    output_file = settings.output_file
+    done()
+
+    print('    Creating MGL context')
+    ctx = mgl.create_context(standalone=True)
+    ctx.enable(mgl.DEPTH_TEST)
+    ctx.enable(mgl.CULL_FACE)
+    ctx.cull_face = 'back'
+    done()
+
+    print(f'  Reading GLTF file from "{gltf_file}"')
+    mesh_data, texture_data = gltf_extract(gltf_file)
+
+    if mesh_data is None:
+        raise ValueError('Mesh data could not be extracted')
+
+    if texture_data is None:
+        texture_data = TextureData(gen_checkerboard_tex(8, 8, MAGENTA, BLACK, dtype='f4'))
+        print(f'    No texture extracted: Default texture was generated')
+    else:
+        byte_size = texture_data.byte_size(dtype='f4')
+        width, height = texture_data.texture.shape[1::-1]
+        print(f'    Texture extracted: ({width}, {height}) x {texture_data.texture.shape[2]} [{byte_size} B]')
+
+        if width > MAX_TEX_DIM or height > MAX_TEX_DIM:
+            if width > height:
+                fact = MAX_TEX_DIM / width
+            else:
+                fact = MAX_TEX_DIM / height
+            texture_data.texture = cv2.resize(texture_data.texture, None, fx=fact, fy=fact)
+            print(f'    Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+                  f'to fit texture dimension restriction of {MAX_TEX_DIM}px')
+            byte_size = texture_data.byte_size(dtype='f4')
+
+        if byte_size > CPP_INT_MAX:
+            texture_data.scale_to_fit(CPP_INT_MAX, dtype='f4')  # necessary since moderngl uses this data type
+            print(f'    Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+                  f'to fit size restriction of {CPP_INT_MAX} B')
+
+    center, aabb = get_center(mesh_data.vertices)
+    center.z += aabb.depth + 100
+    ortho_size = ortho_size if ortho_size is not None else (int_up(aabb.width), int_up(aabb.height))
+    done()
+
+    print(f'  Creating context and renderer')
+    camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center, far=100000)
+    renderer = Renderer(resolution, ctx, camera, mesh_data, texture_data)
+    done()
+
+    print(f'  Extracting shots from "{json_file}" (Creating lazy shots: {lazy})')
+    shots = CtxShot.from_json(json_file, ctx, count=count + initial_skip, correction=correction, lazy=lazy)
+    shots = shots[initial_skip::skip]
+    done()
+
+    if shot_centered_camera:
+        print('  Centering camera on shots')
+        shot_center = get_vector_center([shot.camera.transform.position for shot in shots])
+        camera.transform.position.x = shot_center.x
+        camera.transform.position.y = shot_center.y
+        renderer.apply_camera()
+        done()
+
+    if mask_file is not None:
+        print(f'  Reading mask from "{mask_file}"')
+        mask_img = cv2.imread(mask_file)
+        mask_img = mask_img[..., 0].astype('f4')
+        mask_img = np.resize(mask_img, (*mask_img.shape, 1))
+        mask_img /= 255.0
+        mask = TextureData(mask_img)
+        done()
+    else:
+        mask = None
+
+    print('  Rendering background')
+    background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
+    cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
+    done()
+
+    print(f'  Creating Frames (Frames to be rendered: {frame_count}; Correction range: ({min_focus, max_focus})')
+    frame_done = DoneCallback('      ')
+    if not frame_dir.endswith(PATH_SEP):
+        frame_dir += PATH_SEP
+    os.makedirs(frame_dir, exist_ok=True)
+    range_focus = max_focus - min_focus
+    focus_step = range_focus / frame_count
+    frame_files = []
+    for i in range(frame_count):
+        print(f'    Creating frame {i}')
+        # TODO: Make shots reusable after release
+        shot_loader = AsyncShotLoader(shots, 15, 8)
+        result = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
+                                    release_shots=release_shots)
+        del shot_loader
+        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+        img = overlay(background, img)
+        im_pil = Image.fromarray(img)
+        frame_file = f'{frame_dir}{i}.png'
+        im_pil.save(frame_file)
+        frame_files.append(frame_file)
+        for shot in shots:
+            shot.correction.position.z += focus_step
+        frame_done()
+    done()
+
+    print('  Creating video file')
+    video_from_images(frame_files, output_file, release_images=True)
+    done()
+
+    if delete_frames:
+        print('  Deleting frames')
+        for frame_file in frame_files:
+            os.remove(frame_file)
+        done()
+
+    print('  Release all resources')
+    for shot in shots:
+        shot.release()
+
+    renderer.release()
+    ctx.release()
+    done()
+
+    done.all_done()
 
 def test_deferred_shading() -> None:
     file = f'{INPUT_DIR}mesh.glb'
@@ -235,7 +413,6 @@ def test_deferred_shading() -> None:
 
     # TODO: fix second pass not rendering anything
 
-
 def test_fit_to_points(count: int = 1):
     ctx = mgl.create_context(standalone=True)
     ctx.enable(mgl.DEPTH_TEST)
@@ -287,30 +464,29 @@ def test_fit_to_points(count: int = 1):
     renderer.release()
     ctx.release()
 
-
 def main() -> None:
-    bambi_data_dir = 'D:\\BambiData\\'
-    gltf_file = rf'{bambi_data_dir}DEM\Hagenberg\dem_mesh_r2.glb'
-    json_file = rf'{bambi_data_dir}Processed\Hagenberg\NeRF Grid\Frames_T\poses.json'
-    mask_file = rf'{bambi_data_dir}Processed\Hagenberg\NeRF Grid\Frames_T\mask_T.png'
+    # bambi_data_dir = 'D:\\BambiData\\'
+    gltf_file = rf'D:\BambiData\test_flight_data\dem_mesh_r2_big.glb'
+    json_file = rf'D:\BambiData\test_flight_data\frames\t\poses.json'
+    mask_file = rf'D:\BambiData\test_flight_data\frames\t\mask_T.png'
 
     correction = Transform()
-    correction.position.z = 2
     correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
-
-    output_file = f'{OUTPUT_DIR}integral.png'
-
-    settings = ProjectionSettings(count=2, initial_skip=0, correction=correction, output_file=output_file)
-
+    output_file = rf'{OUTPUT_DIR}integral'
+    settings = ProjectionSettings(count=100, initial_skip=6600, shot_centered_camera=True, correction=correction,
+                                  resolution=(1024, 1024), ortho_size=(69.69, 69.69),
+                                  show_integral=True, output_file=output_file)
     test_projection(gltf_file, json_file, mask_file, settings)
 
-    # vals = np.arange(-1, 1.05, 0.1) * 0.08726646
-    # for val in vals:
-    # correction_rot = Quaternion.from_z_rotation(0.08726646, dtype='f4')
-    # correction.rotation = correction_rot
-    # test_projection(100, 0, ProjectMode.SHOT_VIEW_RELATIVE, correction, f'{0.08726646*1000:.0f}')
-    # test_load_all_images(f'{INPUT_DIR}data\\haag\\')
+    # fps = 10
+    # duration = 2
+    # min_focus = 6.2
+    # max_focus = 15
+    # settings = FocusAnimationSettings(count=100, initial_skip=6600, shot_centered_camera=True,
+    #                                   resolution=(1024, 1024), ortho_size=(120, 120),
+    #                                   delete_frames=False, output_file=output_file)
 
+    # test_focus_animation(gltf_file, json_file, mask_file, min_focus, max_focus, duration * fps, settings)
 
 if __name__ == '__main__':
     main()

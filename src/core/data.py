@@ -227,7 +227,36 @@ class ProjectionSettings:
     :cvar initial_skip: The number of shots read from the JSON file to be skipped from the beginning
     :cvar skip: The number of shots to be skipped after every shot projection
     :cvar lazy: Whether the shots should be loaded lazy
+    :cvar shot_centered_camera: Whether the camera should be moved to look at the center of the shots
     :cvar release_shots: Whether the renderer should release shots as soon as he used them
+    :cvar correction: The correction to be applied to every single shot
+    :cvar show_integral: Whether to show the resulting integral in a photo viewer
+    :cvar output_file: The path and name of the output to be generated
+    """
+    count: int = 1
+    initial_skip: int = 0
+    skip: int = 1
+    lazy: bool = True
+    shot_centered_camera: bool = False
+    resolution: tuple[int, int] = 1024, 1024
+    ortho_size: Optional[tuple[float, float]] = None
+    release_shots: bool = True
+    correction: Optional[Transform] = None
+    show_integral: bool = False
+    output_file: str = ''
+
+@dataclass
+class FocusAnimationSettings:
+    """
+    Class storing settings used by the focus animation process
+    :cvar count: The max amount of shots to be used
+    :cvar initial_skip: The number of shots read from the JSON file to be skipped from the beginning
+    :cvar skip: The number of shots to be skipped after every shot projection
+    :cvar lazy: Whether the shots should be loaded lazy
+    :cvar shot_centered_camera: Whether the camera should be moved to look at the center of the shots
+    :cvar release_shots: Whether the renderer should release shots as soon as he used them
+    :cvar frame_dir: The directory to which all frames will be saved
+    :cvar delete_frames: Whether the frames saved to the frame directory should be deleted after they were written to the video file
     :cvar correction: The correction to be applied to every single shot
     :cvar output_file: The path and name of the output to be generated
     """
@@ -235,6 +264,12 @@ class ProjectionSettings:
     initial_skip: int = 0
     skip: int = 1
     lazy: bool = True
+    shot_centered_camera: bool = False
+    resolution: tuple[int, int] = 1024, 1024
+    ortho_size: Optional[tuple[float, float]] = None
     release_shots: bool = True
     correction: Optional[Transform] = None
+    frame_dir: str = './.frames'
+    delete_frames: bool = True
     output_file: str = ''
+
