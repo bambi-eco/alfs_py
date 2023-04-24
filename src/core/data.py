@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from moderngl import VertexArray, Buffer, Texture, Program
 from numpy.typing import NDArray
-from pyrr import Vector3
+from pyrr import Vector3, Matrix44
 
 from src.core.geo.transform import Transform
 
@@ -19,8 +19,9 @@ class MeshData:
     :cvar uvs: The uvs coordinates of the vertices (optional)
     """
     vertices: NDArray
-    indices: Optional[NDArray]
-    uvs: Optional[NDArray]
+    indices: Optional[NDArray] = None
+    uvs: Optional[NDArray] = None
+    transform: Optional[Transform] = None
 
 
 @dataclass
@@ -102,13 +103,20 @@ class RenderObject:
     uv_buf: Optional[Buffer] = None
     ibo: Optional[Buffer] = None
     tex: Optional[Texture] = None
+    transform: Optional[Transform] = None
 
-    def tex_use(self) -> None:
+    def tex_use(self, location: int = 0) -> None:
         """
         Binds the texture of this object to a texture unit
         """
         if self.tex is not None:
-            self.tex.use()
+            self.tex.use(location)
+
+    def mat(self, dtype: Any = None) -> Matrix44:
+        if self.transform is None:
+            return Matrix44.identity(dtype='f4')
+        else:
+            return self.transform.mat(dtype)
 
     def render(self, mode: Optional[int] = None) -> None:
         """

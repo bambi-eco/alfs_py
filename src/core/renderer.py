@@ -84,7 +84,7 @@ class Renderer:
         self._mask_tex = None
 
         self.camera = camera
-        self.apply_camera()
+        self.apply_matrices()
 
     @property
     def render_shape(self) -> tuple[int, int, int]:
@@ -101,12 +101,12 @@ class Renderer:
 
         return RenderObject(vao, vao_content, vertex_buf, None, ibo, self._obj.tex)
 
-    def apply_camera(self) -> None:
+    def apply_matrices(self) -> None:
         """
         Applies the current camera values to the shader
         """
         for prog in (self._obj_prog, self._shot_prog):
-            prog[self._PAR_MODEL].write(Matrix44.identity(dtype='f4'))
+            prog[self._PAR_MODEL].write(self._obj.mat())
             prog[self._PAR_VIEW].write(self.camera.get_view())
             prog[self._PAR_PROJ].write(self.camera.get_proj())
 
@@ -185,7 +185,7 @@ class Renderer:
 
             # apply camera
             self.camera = camera
-            self.apply_camera()
+            self.apply_matrices()
 
             # project shot
             result = self._project_shot(shot)

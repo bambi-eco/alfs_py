@@ -75,7 +75,7 @@ class Transform:
             dtype = self._scale.dtype
         return Matrix44.from_scale(self._scale, dtype=dtype)
 
-    @property
+
     def mat(self, dtype: Any = None) -> Matrix44:
         """
         :param dtype: The data type to be used for the matrix (optional)

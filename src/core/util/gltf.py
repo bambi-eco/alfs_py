@@ -1,3 +1,4 @@
+import json
 from typing import Optional
 from urllib.request import urlopen
 
@@ -6,6 +7,7 @@ from gltflib import GLTF
 from numpy.typing import NDArray
 
 from src.core.data import MeshData, TextureData
+from src.core.geo.transform import Transform
 from src.core.util.image import bytes_to_img
 
 
@@ -26,10 +28,11 @@ def _get_from_buffer(idx: int, gltf: GLTF, comp: int, dtype: str = 'f4') -> NDAr
     return np.frombuffer(data_bytes, dtype=dtype).reshape((-1, comp))
 
 
-def gltf_to_mesh_data(gltf: GLTF) -> Optional[MeshData]:
+def gltf_to_mesh_data(gltf: GLTF, transform: Optional[Transform] = None) -> Optional[MeshData]:
     """
     Extracts the first mesh found within the ``GLTF`` object
     :param gltf: The ``GLTF`` object to extract the mesh from
+    :param transform: The transform to add to the extracted mesh data (optional)
     :return: If the ``GLTF`` object contains no meshes returns ``None``;
     otherwise returns a ``MeshData`` object containing vertices, indices and UV coordinates.
     If indices and/or UV coordinates cannot be extracted they will be set to None.
@@ -46,7 +49,7 @@ def gltf_to_mesh_data(gltf: GLTF) -> Optional[MeshData]:
     uvs_idx = mesh_attrs.TEXCOORD_0
     uvs = _get_from_buffer(uvs_idx, gltf, 2) if uvs_idx is not None else None
 
-    return MeshData(vertices, indices, uvs)
+    return MeshData(vertices, indices, uvs, transform)
 
 
 def gltf_to_texture_data(gltf: GLTF) -> Optional[TextureData]:
@@ -79,11 +82,12 @@ def gltf_to_texture_data(gltf: GLTF) -> Optional[TextureData]:
     return TextureData(texture) if texture is not None else None
 
 
-def gltf_extract(file: str) -> tuple[Optional[MeshData], Optional[TextureData]]:
+def gltf_extract(file: str, transform: Optional[Transform] = None) -> tuple[Optional[MeshData], Optional[TextureData]]:
     """
     Extracts mesh and texture data from a GLTF file via ``get_mesh_data`` and ``get_texture_data``
     :param file: Path to a GLTF file
+    :param transform: The transform to add to the extracted mesh data (optional)
     :return: A tuple containing the results of ``get_mesh_data`` and ``get_texture_data``
     """
     gltf_file = GLTF.load(file, load_file_resources=True)
-    return gltf_to_mesh_data(gltf_file), gltf_to_texture_data(gltf_file)
+    return gltf_to_mesh_data(gltf_file, transform), gltf_to_texture_data(gltf_file)

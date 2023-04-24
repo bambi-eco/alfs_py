@@ -65,8 +65,8 @@ class CtxShot:
             self._init_texture()
 
     @staticmethod
-    def _load_image(texture_filename) -> NDArray:
-        img = cv2.imread(texture_filename, cv2.IMREAD_UNCHANGED)
+    def _load_image_from_path(img_path: str) -> NDArray:
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         channel_count = 1 if len(img.shape) == 2 else img.shape[2]
 
         # convert to and guarantee RGBA
@@ -79,31 +79,34 @@ class CtxShot:
         img = img.astype('f4')
         return img
 
+    @property
+    def _can_initialize(self):
+        """
+        :return: Whether the shot can currently be initialized
+        """
+        return not self._released or self._img_file is not None
+
     def load_image(self):
         """
-        When the shot was initialized using a file path, replaces this path with a loaded version of the image
+        When the shot was initialized using a file path, loads the associated image
         """
-        if self.tex_data is None and not self._released:  # ensures img_file is set
-            self.tex_data = TextureData(self._load_image(str(self._img_file)))
+        if self.tex_data is None and self._can_initialize:  # ensures img_file is set
+            self.tex_data = TextureData(self._load_image_from_path(str(self._img_file)))
 
     def _init_texture(self):
-        if self.tex is None and not self._released:
+        if self.tex is None and self._can_initialize:
             self.tex = self._ctx.texture(*self.tex_data.tex_gen_input(), dtype='f4')
 
     @property
     def img(self) -> Optional[NDArray]:
         """
-        :return: A copy of the picture associated with the shot
+        :return: If the shot was initialized using a path and that path was not yet loaded ``None``;
+        Otherwise a copy of the associated image
         """
         if self.tex_data is None:
-            self.load_image()
-        return self.tex_data.texture.copy()
-
-    def get_proj(self) -> Matrix44:
-        """
-        :return: A matrix representing the projection of this shots camera
-        """
-        return self.camera.get_proj(dtype='f4')
+            return None
+        else:
+            return self.tex_data.texture.copy()
 
     def release(self) -> None:
         """
@@ -125,13 +128,19 @@ class CtxShot:
         """
         Binds the texture of this object to a texture unit
         """
-        if self._released:
-            raise RuntimeError('Shot cannot be used as it has already been released')
+        if self._released and not self._can_initialize:
+            raise RuntimeError('Shot cannot be used as it was initialized using image data and has already been released')
         if self.tex_data is None:
             self.load_image()
         if self.tex is None:
             self._init_texture()
         self.tex.use(location)
+
+    def get_proj(self) -> Matrix44:
+        """
+        :return: A matrix representing the projection of this shots camera
+        """
+        return self.camera.get_proj(dtype='f4')
 
     def get_view(self) -> Matrix44:
         """
@@ -143,7 +152,7 @@ class CtxShot:
         """
         :return: A matrix representing the correction to be applied to this shot
         """
-        return self.correction.mat
+        return self.correction.mat(dtype='f4')
 
     def get_mat(self) -> Matrix44:
         """

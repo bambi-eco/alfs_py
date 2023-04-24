@@ -52,8 +52,8 @@ class DoneCallback:
         self.start = current
 
 
-def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = None,
-                    settings: Optional[ProjectionSettings] = None):
+def test_projection(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
+                    settings: Optional[ProjectionSettings] = None) -> None:
     done = DoneCallback('    ')
     print('Start projection process')
 
@@ -68,13 +68,6 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
     correction = settings.correction
     show_integral = settings.show_integral
     output_file = settings.output_file
-
-    print('    Creating MGL context')
-    ctx = mgl.create_context(standalone=True)
-    ctx.enable(mgl.DEPTH_TEST)
-    ctx.enable(mgl.CULL_FACE)
-    ctx.cull_face = 'back'
-    done()
 
     print(f'  Reading GLTF file from "{gltf_file}"')
     mesh_data, texture_data = gltf_extract(gltf_file)
@@ -110,13 +103,20 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
     ortho_size = ortho_size if ortho_size is not None else (int_up(aabb.width), int_up(aabb.height))
     done()
 
-    print(f'  Creating context and renderer')
+    print('    Creating MGL context')
+    ctx = mgl.create_context(standalone=True)
+    ctx.enable(mgl.DEPTH_TEST)
+    ctx.enable(mgl.CULL_FACE)
+    ctx.cull_face = 'back'
+    done()
+
+    print(f'  Creating camera and renderer')
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center, far=100000)
     renderer = Renderer(resolution, ctx, camera, mesh_data, texture_data)
     done()
 
-    print(f'  Extracting shots from "{json_file}" (Creating lazy shots: {lazy})')
-    shots = CtxShot.from_json(json_file, ctx, count=count + initial_skip, correction=correction, lazy=lazy)
+    print(f'  Extracting shots from "{shot_json_file}" (Creating lazy shots: {lazy})')
+    shots = CtxShot.from_json(shot_json_file, ctx, count=count + initial_skip, correction=correction, lazy=lazy)
     shots = shots[initial_skip::skip]
     # shot_loader = SyncShotLoader(shots)
     shot_loader = AsyncShotLoader(shots, 15, 8)
@@ -127,7 +127,7 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
         shot_center = get_vector_center([shot.camera.transform.position for shot in shots])
         camera.transform.position.x = shot_center.x
         camera.transform.position.y = shot_center.y
-        renderer.apply_camera()
+        renderer.apply_matrices()
         done()
 
     if mask_file is not None:
@@ -179,8 +179,8 @@ def test_projection(gltf_file: str, json_file: str, mask_file: Optional[str] = N
     done.all_done()
 
 
-def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str] = None,
-                         min_focus: float = 0.0, max_focus: float = 5.0, frame_count: int = 3600,
+def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
+                         start_focus: float = 0.0, end_focus: float = 5.0, frame_count: int = 3600, fps: float = 30,
                          settings: Optional[FocusAnimationSettings] = None) -> None:
     done = DoneCallback('    ')
     print('Start focus animation process')
@@ -190,7 +190,7 @@ def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str
         settings = ProjectionSettings()
     if settings.correction is None:
         settings.correction = Transform()
-        settings.correction.position.z = min_focus
+        settings.correction.position.z = start_focus
 
     count = settings.count
     initial_skip = settings.initial_skip
@@ -204,13 +204,6 @@ def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str
     frame_dir = settings.frame_dir
     delete_frames = settings.delete_frames
     output_file = settings.output_file
-    done()
-
-    print('    Creating MGL context')
-    ctx = mgl.create_context(standalone=True)
-    ctx.enable(mgl.DEPTH_TEST)
-    ctx.enable(mgl.CULL_FACE)
-    ctx.cull_face = 'back'
     done()
 
     print(f'  Reading GLTF file from "{gltf_file}"')
@@ -247,13 +240,20 @@ def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str
     ortho_size = ortho_size if ortho_size is not None else (int_up(aabb.width), int_up(aabb.height))
     done()
 
-    print(f'  Creating context and renderer')
+    print('    Creating MGL context')
+    ctx = mgl.create_context(standalone=True)
+    ctx.enable(mgl.DEPTH_TEST)
+    ctx.enable(mgl.CULL_FACE)
+    ctx.cull_face = 'back'
+    done()
+
+    print(f'  Creating camera and renderer')
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center, far=100000)
     renderer = Renderer(resolution, ctx, camera, mesh_data, texture_data)
     done()
 
-    print(f'  Extracting shots from "{json_file}" (Creating lazy shots: {lazy})')
-    shots = CtxShot.from_json(json_file, ctx, count=count + initial_skip, correction=correction, lazy=lazy)
+    print(f'  Extracting shots from "{shot_json_file}" (Creating lazy shots: {lazy})')
+    shots = CtxShot.from_json(shot_json_file, ctx, count=count + initial_skip, correction=correction, lazy=lazy)
     shots = shots[initial_skip::skip]
     done()
 
@@ -262,7 +262,7 @@ def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str
         shot_center = get_vector_center([shot.camera.transform.position for shot in shots])
         camera.transform.position.x = shot_center.x
         camera.transform.position.y = shot_center.y
-        renderer.apply_camera()
+        renderer.apply_matrices()
         done()
 
     if mask_file is not None:
@@ -281,12 +281,12 @@ def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str
     cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     done()
 
-    print(f'  Creating Frames (Frames to be rendered: {frame_count}; Correction range: ({min_focus, max_focus})')
+    print(f'  Creating Frames (Frames to be rendered: {frame_count}; Correction range: ({start_focus, end_focus})')
     frame_done = DoneCallback('      ')
     if not frame_dir.endswith(PATH_SEP):
         frame_dir += PATH_SEP
     os.makedirs(frame_dir, exist_ok=True)
-    range_focus = max_focus - min_focus
+    range_focus = end_focus - start_focus
     focus_step = range_focus / frame_count
     frame_files = []
     for i in range(frame_count):
@@ -308,7 +308,7 @@ def test_focus_animation(gltf_file: str, json_file: str, mask_file: Optional[str
     done()
 
     print('  Creating video file')
-    video_from_images(frame_files, output_file, release_images=True)
+    video_from_images(frame_files, output_file, fps=fps, release_images=True)
     done()
 
     if delete_frames:
@@ -467,26 +467,27 @@ def test_fit_to_points(count: int = 1):
 def main() -> None:
     # bambi_data_dir = 'D:\\BambiData\\'
     gltf_file = rf'D:\BambiData\test_flight_data\dem_mesh_r2_big.glb'
-    json_file = rf'D:\BambiData\test_flight_data\frames\t\poses.json'
+    shot_json_file = rf'D:\BambiData\test_flight_data\frames\t\poses.json'
     mask_file = rf'D:\BambiData\test_flight_data\frames\t\mask_T.png'
 
-    correction = Transform()
-    correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
-    output_file = rf'{OUTPUT_DIR}integral'
-    settings = ProjectionSettings(count=100, initial_skip=6600, shot_centered_camera=True, correction=correction,
-                                  resolution=(1024, 1024), ortho_size=(69.69, 69.69),
-                                  show_integral=True, output_file=output_file)
-    test_projection(gltf_file, json_file, mask_file, settings)
+    # correction = Transform()
+    # correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
+    # output_file = rf'{OUTPUT_DIR}integral'
+    # settings = ProjectionSettings(count=100, initial_skip=6600, shot_centered_camera=True, correction=correction,
+    #                               resolution=(1024, 1024), ortho_size=(69.69, 69.69),
+    #                               show_integral=True, output_file=output_file)
+    # test_projection(gltf_file, shot_json_file, mask_file, settings)
 
-    # fps = 10
-    # duration = 2
-    # min_focus = 6.2
-    # max_focus = 15
-    # settings = FocusAnimationSettings(count=100, initial_skip=6600, shot_centered_camera=True,
-    #                                   resolution=(1024, 1024), ortho_size=(120, 120),
-    #                                   delete_frames=False, output_file=output_file)
+    fps = 5
+    duration = 2
+    start_focus = 6.2
+    end_focus = 15
+    output_file = rf'{OUTPUT_DIR}focus_anim'
+    settings = FocusAnimationSettings(count=100, initial_skip=6600, shot_centered_camera=True,
+                                      resolution=(1024, 1024), ortho_size=(120, 120),
+                                      delete_frames=True, output_file=output_file)
 
-    # test_focus_animation(gltf_file, json_file, mask_file, min_focus, max_focus, duration * fps, settings)
+    test_focus_animation(gltf_file, shot_json_file, mask_file, start_focus, end_focus, duration * fps, fps, settings)
 
 if __name__ == '__main__':
     main()
