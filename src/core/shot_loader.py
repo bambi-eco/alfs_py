@@ -73,6 +73,13 @@ class AsyncShotLoader(ShotLoader):
         for _ in range(load_count):
             self._add_task()
 
+    def __del__(self):
+        task: concurrent.futures.Future
+        for item in self._task_dict:
+            self._task_dict[item].cancel()
+        self._task_dict.clear()
+
+
     def _add_task(self):
         if self._has_next_task:
             try:

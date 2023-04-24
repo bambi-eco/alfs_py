@@ -279,5 +279,8 @@ class FocusAnimationSettings:
     correction: Optional[Transform] = None
     frame_dir: str = './.frames'
     delete_frames: bool = True
+    first_frame_repetitions: Optional[int] = None
+    last_frame_repetitions: Optional[int] = None
     output_file: str = ''
+
 

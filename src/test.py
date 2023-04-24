@@ -1,4 +1,5 @@
 import os
+import os
 import time
 from typing import Final, Optional
 
@@ -6,7 +7,7 @@ import cv2
 import moderngl as mgl
 import numpy as np
 from PIL import Image
-from pyrr import Matrix44, Vector3, Quaternion
+from pyrr import Matrix44, Vector3
 
 from src.core.camera import Camera
 from src.core.data import TextureData, ProjectionSettings, FocusAnimationSettings
@@ -203,6 +204,8 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
     correction = settings.correction
     frame_dir = settings.frame_dir
     delete_frames = settings.delete_frames
+    first_frame_repetitions = settings.first_frame_repetitions
+    last_frame_repetitions = settings.last_frame_repetitions
     output_file = settings.output_file
     done()
 
@@ -281,7 +284,7 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
     cv2.imwrite(f'{OUTPUT_DIR}back.png', cv2.cvtColor(background, cv2.COLOR_BGRA2RGBA))
     done()
 
-    print(f'  Creating Frames (Frames to be rendered: {frame_count}; Correction range: ({start_focus, end_focus})')
+    print(f'  Creating Frames (Frames to be rendered: {frame_count}; Focus: {start_focus} -> {end_focus})')
     frame_done = DoneCallback('      ')
     if not frame_dir.endswith(PATH_SEP):
         frame_dir += PATH_SEP
@@ -291,16 +294,18 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
     frame_files = []
     for i in range(frame_count):
         print(f'    Creating frame {i}')
-        # TODO: Make shots reusable after release
-        shot_loader = AsyncShotLoader(shots, 15, 8)
+        shots_copy = [shot.create_anew() for shot in shots]
+        shot_loader = AsyncShotLoader(shots_copy, 15, 8)
         result = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
                                     release_shots=release_shots)
-        del shot_loader
         img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
         img = overlay(background, img)
         im_pil = Image.fromarray(img)
         frame_file = f'{frame_dir}{i}.png'
         im_pil.save(frame_file)
+        del shot_loader
+        del img
+        del im_pil
         frame_files.append(frame_file)
         for shot in shots:
             shot.correction.position.z += focus_step
@@ -308,7 +313,8 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
     done()
 
     print('  Creating video file')
-    video_from_images(frame_files, output_file, fps=fps, release_images=True)
+    video_from_images(frame_files, output_file, fps=fps, release_images=True, first_frame_repetitions=first_frame_repetitions,
+                      last_frame_repetitions=last_frame_repetitions)
     done()
 
     if delete_frames:
@@ -466,9 +472,9 @@ def test_fit_to_points(count: int = 1):
 
 def main() -> None:
     # bambi_data_dir = 'D:\\BambiData\\'
-    gltf_file = rf'D:\BambiData\test_flight_data\dem_mesh_r2_big.glb'
-    shot_json_file = rf'D:\BambiData\test_flight_data\frames\t\poses.json'
-    mask_file = rf'D:\BambiData\test_flight_data\frames\t\mask_T.png'
+    gltf_file = rf'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
+    shot_json_file = rf'D:\BambiData\Processed\Hagenberg\KFV-hgb-Enew\Frames_T\poses.json'
+    mask_file = rf'D:\BambiData\Processed\Hagenberg\KFV-hgb-Enew\Frames_T\mask_T.png'
 
     # correction = Transform()
     # correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
@@ -478,14 +484,15 @@ def main() -> None:
     #                               show_integral=True, output_file=output_file)
     # test_projection(gltf_file, shot_json_file, mask_file, settings)
 
-    fps = 5
-    duration = 2
-    start_focus = 6.2
-    end_focus = 15
+    fps = 15
+    duration = 3
+    start_focus = 10
+    end_focus = 2
     output_file = rf'{OUTPUT_DIR}focus_anim'
-    settings = FocusAnimationSettings(count=100, initial_skip=6600, shot_centered_camera=True,
-                                      resolution=(1024, 1024), ortho_size=(120, 120),
-                                      delete_frames=True, output_file=output_file)
+    settings = FocusAnimationSettings(count=200, initial_skip=35290, shot_centered_camera=True,
+                                      resolution=(1024*2, 1024*2), ortho_size=(65, 65),
+                                      delete_frames=False, first_frame_repetitions=fps, last_frame_repetitions=fps,
+                                      output_file=output_file)
 
     test_focus_animation(gltf_file, shot_json_file, mask_file, start_focus, end_focus, duration * fps, fps, settings)
 

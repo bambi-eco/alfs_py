@@ -79,12 +79,25 @@ class CtxShot:
         img = img.astype('f4')
         return img
 
+    def create_anew(self) -> 'CtxShot':
+        """
+        Initializes a new ``CtxShot`` object using the current values of this instance.
+        Laziness is carried over and the new instance would have to reload the associated image data.
+        :return: A new ``CtxShot`` instance
+        """
+        img = self._img_file if self.lazy else self.img
+        position = self.camera.transform.position
+        rotation = self.camera.transform.rotation
+        fovy = self.camera.fovy
+        aspect_ratio = self.camera.aspect_ratio
+        return CtxShot(self._ctx, img, position, rotation, fovy, aspect_ratio, self.correction, self.lazy)
+
     @property
     def _can_initialize(self):
         """
         :return: Whether the shot can currently be initialized
         """
-        return not self._released or self._img_file is not None
+        return not self._released
 
     def load_image(self):
         """
