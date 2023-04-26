@@ -103,7 +103,7 @@ class Renderer:
 
     def apply_matrices(self) -> None:
         """
-        Applies the current camera values to the shader
+        Applies the current camera and mesh matrix values to the shader
         """
         for prog in (self._obj_prog, self._shot_prog):
             prog[self._PAR_MODEL].write(self._obj.mat())

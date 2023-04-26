@@ -40,18 +40,21 @@ def compare_color(col_a: Union[NDArray, Iterable, int, float], col_b: Union[NDAr
 
 
 
-def get_aabb(vertices: NDArray) -> AABB:
+def get_aabb(points: Union[Collection[Vector3], NDArray]) -> AABB:
     """
-    Determines the smallest convex AABB for the given vertices
-    :param vertices: The vertices
+    Determines the smallest convex AABB for the given points
+    :param points: The vertices
     :return: An AABB
     """
-    max_x, max_y, max_z = np.max(vertices, axis=0)
-    min_x, min_y, min_z = np.min(vertices, axis=0)
+    if not isinstance(points, np.ndarray):
+        points = np.stack(points)
+
+    max_x, max_y, max_z = np.max(points, axis=0)
+    min_x, min_y, min_z = np.min(points, axis=0)
     max_p = Vector3((max_x, max_y, max_z))
     min_p = Vector3((min_x, min_y, min_z))
-    return AABB(min_p, max_p)
 
+    return AABB(min_p, max_p)
 
 def get_center(vertices: NDArray) -> tuple[Vector3, AABB]:
     """
@@ -60,14 +63,7 @@ def get_center(vertices: NDArray) -> tuple[Vector3, AABB]:
     :return: A tuple containing the center of the vertices and the two points defining the vertices AABB
     """
     aabb = get_aabb(vertices)
-    max_x, max_y, max_z = aabb.p_e
-    min_x, min_y, min_z = aabb.p_s
-    dhx = abs(max_x - min_x) / 2.0
-    dhy = abs(max_y - min_y) / 2.0
-    dhz = abs(max_z - min_z) / 2.0
-
-    center = Vector3((min_x + dhx, min_y + dhy, min_z + dhz))
-    return center, aabb
+    return aabb.center, aabb
 
 def get_vector_center(vectors: Sequence[Vector3]) -> Vector3:
     """

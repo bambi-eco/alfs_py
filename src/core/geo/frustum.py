@@ -228,7 +228,7 @@ class Frustum:
         points = tuple(points)
         for i, point in enumerate(points):
             # project point onto relative plane of the frustums up and right vector to remove depth
-            t_point = self.transform.mat.inverse * point
+            t_point = self.transform.mat().inverse * point
             t_proj_r = t_point * RIGHT  # vector_project(t_point, RIGHT)
             t_proj_u = t_point * UP  # vector_project(t_point, UP)
             t_proj = t_proj_r + t_proj_u

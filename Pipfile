@@ -4,12 +4,13 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-numpy="*"
+gltflib = "*"
 matplotlib="*"
 moderngl="*"
+numpy="*"
 opencv-python="*"
-gltflib = "*"
 pyrr = "*"
+pillow = "*"
 
 [dev-packages]
 

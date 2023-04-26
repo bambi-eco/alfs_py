@@ -15,11 +15,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
-
-# Korrektur:
-# - Varianz im Bild als metrik für schärfe implementieren
-# - Mehrere Rotationen um X-Y-Z-Achse der Drohen durchtesten um schärfe zu maximieren (+ - 5°)
-# - Edge Detector auf shots anwenden
-# - Scipy minimum function optimierung auf winkel anwenden
-
