@@ -629,7 +629,7 @@ def main() -> None:
 
     # correction = Transform()
     # correction.position.z = 2.0
-    # correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
+    # correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
     # output_file = rf'{OUTPUT_DIR}integral'
     # settings = ProjectionSettings(count=count, initial_skip=first, camera_dist=0.0,
     #                               camera_position_mode=CameraPositioningMode.shot_centered,
@@ -642,7 +642,7 @@ def main() -> None:
     # start_focus = 22
     # end_focus = 2
     # correction = Transform()
-    # correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
+    # correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
     # output_file = rf'{OUTPUT_DIR}focus_anim'
     # settings = FocusAnimationSettings(
     #     start_focus=start_focus, end_focus=end_focus, frame_count=duration * fps, fps=fps,
@@ -655,7 +655,7 @@ def main() -> None:
     shots_grow_func = lambda x: int(np.ceil(np.exp(x * 0.2 - 0.8)))
     correction = Transform()
     correction.position.z = 22
-    correction.rotation = Quaternion.from_z_rotation(np.deg2rad(1.0), dtype='f4')
+    correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
     output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_22'
     settings = ShutterAnimationSettings(
         shots_grow_func=shots_grow_func, reference_index=center - first, grow_symmetrical=True,
