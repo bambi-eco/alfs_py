@@ -1,5 +1,5 @@
 from itertools import repeat, chain
-from typing import Union, Collection, Optional, Callable, Sequence
+from typing import Union, Optional, Callable, Sequence
 
 import cv2
 from numpy.typing import NDArray

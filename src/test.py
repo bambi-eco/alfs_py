@@ -304,7 +304,7 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
         settings = ProjectionSettings()
 
     if settings.correction is None:
-            settings.correction = Transform()
+        settings.correction = Transform()
 
     start_focus = settings.start_focus
     end_focus = settings.end_focus

@@ -8,15 +8,13 @@ import cv2
 import numpy as np
 from moderngl import Context, Program, Framebuffer, Texture
 from numpy.typing import NDArray
-from pyrr import Matrix44
 
 from src.core.camera import Camera
 from src.core.data import MeshData, TextureData, RenderObject, AABB
 from src.core.decorators import incomplete
 from src.core.defs import TRANSPARENT, BLACK, MAGENTA
-from src.core.geo.frustum import Frustum
 from src.core.shot import CtxShot
-from src.core.util.basic import gen_checkerboard_tex, get_center, int_up, get_aabb
+from src.core.util.basic import gen_checkerboard_tex, get_aabb
 from src.core.util.image import overlay
 from src.core.util.moderngl import img_from_fbo
 
@@ -381,40 +379,3 @@ class Renderer:
     """
 
     # endregion
-
-
-class CenteredRenderer(Renderer):
-
-    @incomplete(f'Class depends on {Frustum.fit_to_points.__name__} which is incomplete')
-    def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
-                 texture: Optional[TextureData] = None):
-        """
-        Initializes a new ``Renderer`` object
-        :param resolution: The resolution of the images to render
-        :param ctx: The ModernGL context to be used by the renderer
-        :param camera: A camera object holding the desired properties the centered camera should have. The centered
-        camera will adjust position and alter the far clipping plane distance if needed.
-        :param mesh: The mesh data of the main mesh the renderer should work with. It represents the canvas and or
-        background of all done projections or renders
-        :param texture: The texture data of the main mesh (optional). If no texture is given a single colored texture
-        will be generated
-        """
-        center, aabb = get_center(mesh.vertices)
-        if camera.orthogonal:
-            center.z = 1
-            ortho_size = int_up(aabb.width), int_up(aabb.height)
-            camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
-        else:
-            camera_dir = (camera.transform.position - center).normalized
-            corner_dist = (aabb.p_s - center).length
-
-            if camera.aspect_ratio <= 1.0:
-                # fit cameras distance based on the fovy
-                pass
-            else:
-                # fit cameras distance based on the fovx
-                fovx = camera.fovy * camera.aspect_ratio
-
-            camera = Camera()
-
-        super().__init__(resolution, ctx, camera, mesh, texture)

@@ -1,4 +1,4 @@
-from typing import Optional, Iterator
+from typing import Optional, Iterator, Generator
 
 
 def file_name_gen(filetype: str, prefix: Optional[str] = None, suffix: Optional[str] = None) -> Iterator[str]:
@@ -15,7 +15,7 @@ def file_name_gen(filetype: str, prefix: Optional[str] = None, suffix: Optional[
     r_prefix = f'{prefix}_' if prefix is not None else ''
     r_suffix = f'_{suffix}' if suffix is not None else ''
 
-    def gen() -> str:
+    def gen() -> Generator[str, None, None]:
         i = 0
         while True:
             yield f'{r_prefix}{i}{r_suffix}{r_filetype}'

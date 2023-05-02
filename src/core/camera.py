@@ -1,5 +1,5 @@
 import copy
-from typing import Optional, Collection
+from typing import Optional
 
 from pyrr import Matrix44, Quaternion, Vector3
 
@@ -114,7 +114,7 @@ class Camera:
         self._frustum.orthogonal = orthogonal
 
     @property
-    def orthogonal_size(self) -> tuple[int, int]:
+    def orthogonal_size(self) -> tuple[float, float]:
         """
         :return: The camera's orthogonal width and height
         """
@@ -196,12 +196,3 @@ class Camera:
         :param up: The new up vector (optional)
         """
         self.transform.look_at(target, up)
-
-    def fit_to_points(self, points: Collection[Vector3], leeway: float) -> None:
-        """
-        Translates frustum along its viewing direction to capture all given points.
-        This process ignores near and far clipping settings and does not modify them.
-        :param points: A collection of points to capture
-        :param leeway: The maximum angle allowed between a point a side of the frustum expressed by its cosine value
-        """
-        self._frustum.fit_to_points(points, leeway)
