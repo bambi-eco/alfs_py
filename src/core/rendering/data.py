@@ -1,5 +1,6 @@
-from dataclasses import dataclass
-from typing import Optional, Any
+from dataclasses import dataclass, astuple
+from enum import Enum
+from typing import Optional, Any, Iterator
 
 import cv2
 import numpy as np
@@ -9,6 +10,26 @@ from numpy._typing import NDArray
 from pyrr import Matrix44
 
 from src.core.geo.transform import Transform
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """
+    Describes a 2D resolution using whole numbers for width and height
+    :cvar width: The width of the resolution
+    :cvar height: The height of the resolution
+    """
+    width: int
+    height: int
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self.as_tuple())
+
+    def __getitem__(self, key: int) -> int:
+        return self.as_tuple()[key]
+
+    def as_tuple(self) -> tuple[int, int]:
+        return self.width, self.height
 
 
 @dataclass
@@ -183,3 +204,16 @@ class RenderObject:
 
         obj = RenderObject(vao, vao_content, vertex_buf, uv_buf, ibo, tex)
         return obj
+
+
+class RenderResultMode(Enum):
+    """
+    Enumeration of render result format and content codes
+    :cvar complete: The result includes the shot projection and the background object
+    :cvar shot_only: The result only shows the projected shot
+    """
+    complete = 0x00,
+    shot_only = 0x01,
+
+    def __str__(self):
+        return self.name

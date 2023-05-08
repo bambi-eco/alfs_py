@@ -1,32 +1,22 @@
 from collections import defaultdict
-from copy import deepcopy
-from enum import Enum
 from functools import cached_property
-from typing import Final, Optional, Iterable, Union, Iterator, Callable
+from typing import Final, Optional, Iterable, Union, Iterator, Callable, cast
 
 import cv2
 import numpy as np
+import moderngl as mgl
 from moderngl import Context, Program, Framebuffer, Texture
 from numpy.typing import NDArray
 
-from src.core.rendering.camera import Camera
-from src.core.rendering.data import MeshData, TextureData, RenderObject
+from src.core.defs import TRANSPARENT, BLACK, MAGENTA, PATH_SEP
 from src.core.geo.aabb import AABB
-from src.core.decorators import incomplete
-from src.core.defs import TRANSPARENT, BLACK, MAGENTA
+from src.core.rendering.camera import Camera
+from src.core.rendering.data import MeshData, TextureData, RenderObject, Resolution, RenderResultMode
 from src.core.rendering.shot import CtxShot
 from src.core.util.basic import gen_checkerboard_tex, get_aabb
 from src.core.util.image import overlay
 from src.core.util.moderngl import img_from_fbo
 
-
-class ProjectMode(Enum):
-    COMPLETE_VIEW = 0,
-    SHOT_VIEW_RELATIVE = 1,
-    SHOT_VIEW_EXCLUSIVE = 2,
-
-    def __str__(self):
-        return self.name
 
 class _IntegralSumCallback:
     def __init__(self, shape: Union[int, Iterable, tuple[int]], dtype: Optional[object] = np.uint64):
@@ -40,7 +30,7 @@ class _IntegralSumCallback:
 
 class Renderer:
     _released: bool
-    _resolution: Final[tuple[int, int]]
+    _resolution: Final[Resolution]
     _ctx: Final[Context]
     _fbo: Final[Framebuffer]
     _obj_prog: Final[Program]
@@ -50,7 +40,7 @@ class Renderer:
     mesh_aabb: Final[AABB]
     camera: Camera
 
-    def __init__(self, resolution: tuple[int, int], ctx: Context, camera: Camera, mesh: MeshData,
+    def __init__(self, resolution: Resolution, ctx: Context, camera: Camera, mesh: MeshData,
                  texture: Optional[TextureData] = None):
         """
         Initializes a new ``Renderer`` object
@@ -65,7 +55,7 @@ class Renderer:
         self._released = False
         self._resolution = resolution
         self._ctx = ctx
-        self._fbo = self._ctx.simple_framebuffer(resolution, components=4)
+        self._fbo = self._ctx.simple_framebuffer(resolution.as_tuple(), components=4, dtype='f4')
         self._fbo.use()
 
         if texture is None:
@@ -123,7 +113,7 @@ class Renderer:
             self._shot_prog.release()
             self._released = True
 
-    def render_ground(self) -> NDArray:
+    def render_background(self) -> NDArray:
         """
         Renders the ground object
         :return: The finished render result
@@ -150,65 +140,41 @@ class Renderer:
         self._shot_prog[self._PAR_SHOT_VIEW].write(shot.get_view())
         self._shot_prog[self._PAR_SHOT_CORRECTION].write(shot.get_correction())
 
-    def _project_shot(self, shot: CtxShot) -> NDArray:
-        self._ctx.clear(*TRANSPARENT)
+    def _project_shot(self, shot: CtxShot) -> None:
         self._use_shot(shot)
         self._shot.render()
-        result = img_from_fbo(self._fbo)
-        return result
 
     def _psi_complete_view(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
-        background = self.render_ground()
+        background = self.render_background()
         for shot in shots:
-            result = self._project_shot(shot)
+            self._ctx.clear(color=TRANSPARENT)
+            self._project_shot(shot)
+            result = img_from_fbo(self._fbo)
             if release_shots:
                 shot.release()
             yield overlay(background, result)
 
     def _psi_shot_view_relative(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         for shot in shots:
-            result = self._project_shot(shot)
+            self._ctx.clear(color=TRANSPARENT)
+            self._project_shot(shot)
+            result = img_from_fbo(self._fbo)
             if release_shots:
                 shot.release()
             yield result
-
-    @incomplete('Method for projecting points not finished yet')
-    def _psi_shot_view_exclusive(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
-        camera_cache = deepcopy(self.camera)
-        for shot in shots:
-            # compute projected points
-
-            # compute camera to capture all points
-
-            camera = Camera()
-
-            # apply camera
-            self.camera = camera
-            self.apply_matrices()
-
-            # project shot
-            result = self._project_shot(shot)
-
-            if release_shots:
-                shot.release()
-            yield result
-
-        # reset camera
-        self.camera = camera_cache
 
     @cached_property
-    def _psi_look_up(self) -> dict[ProjectMode, Callable[[Iterable[CtxShot], bool], Iterator[NDArray]]]:
+    def _psi_look_up(self) -> dict[RenderResultMode, Callable[[Iterable[CtxShot], bool], Iterator[NDArray]]]:
         # Maybe make this static somehow
         def default(_):
-            raise NotImplementedError(f'Renderer is using invalid projection mode')
+            raise NotImplementedError(f'Renderer is using invalid render mode')
 
-        result: dict[ProjectMode, Callable[[Iterable[CtxShot]], Iterator[NDArray]]] = defaultdict(default)
-        result[ProjectMode.COMPLETE_VIEW] = self._psi_complete_view
-        result[ProjectMode.SHOT_VIEW_RELATIVE] = self._psi_shot_view_relative
-        result[ProjectMode.SHOT_VIEW_EXCLUSIVE] = self._psi_shot_view_exclusive
+        result: dict[RenderResultMode, Callable[[Iterable[CtxShot]], Iterator[NDArray]]] = defaultdict(default)
+        result[RenderResultMode.complete] = self._psi_complete_view
+        result[RenderResultMode.shot_only] = self._psi_shot_view_relative
         return result
 
-    def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode,
+    def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: RenderResultMode,
                            release_shots: bool = False, mask: Optional[TextureData] = None) -> Iterator[NDArray]:
         """
         Projects and renders all passed shots
@@ -225,7 +191,8 @@ class Renderer:
 
         return self._psi_look_up[mode](shots, release_shots)
 
-    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: ProjectMode, release_shots: bool = False,
+    def project_shots(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: RenderResultMode,
+                      release_shots: bool = False,
                       mask: Optional[TextureData] = None, integral: bool = False, save: bool = False,
                       save_name_iter: Optional[Iterator[str]] = None) -> Optional[Union[NDArray, list[NDArray]]]:
         """
@@ -235,7 +202,8 @@ class Renderer:
         :param release_shots: Whether shots should be released after projection (defaults to ``False``)
         :param mask: The mask to be applied to each shot texture (optional)
         :param integral: Whether the result should be the integral of all rendered shots instead of single shot renders
-        (defaults to False)
+        (defaults to False). This process utilizes the CPU for integration and is significantly slower than the
+        ``render_integral`` method, which should be preferred.
         :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``)
         :param save_name_iter: An iterator iterating over file names to be used when the projections should be saved
         instead of being returned
@@ -280,6 +248,52 @@ class Renderer:
                 handle_result(result)
 
             return results
+
+    def render_integral(self, shots: Union[CtxShot, Iterable[CtxShot]], release_shots: bool = False,
+                        mask: Optional[TextureData] = None, save: bool = False,
+                        save_name: Optional[Iterator[str]] = None) -> Optional[NDArray]:
+        """
+        Renders the integral of the given shots on GPU using additive blending. This process will overwrite the current
+        blending function and disable the depth test.
+        :param shots: The shots to be projected and integrated
+        :param release_shots: Whether shots should be released after projection (defaults to ``False``)
+        :param mask: The mask to be applied to each shot texture (optional)
+        :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``)
+        :param save_name: The file name to be used when saving the result (optional)
+        :return: If save is ``True`` ``None``; otherwise the integral of the projected shots
+        """
+        if not isinstance(shots, Iterable):
+            shots = [shots]
+
+        self._use_mask(mask)
+
+        self._ctx.enable(cast(int, mgl.BLEND))
+        self._ctx.disable(cast(int, mgl.DEPTH_TEST))
+        self._ctx.blend_func = mgl.ADDITIVE_BLENDING
+
+        self._fbo.clear(color=TRANSPARENT)
+        for shot in shots:
+            self._project_shot(shot)
+            if release_shots:
+                shot.release()
+
+        integral_bytes = self._fbo.read(components=4, dtype='f4', clamp=False)
+        integral_arr = np.frombuffer(integral_bytes, dtype=np.single).reshape((*self._fbo.size[1::-1], 4))
+        alpha = integral_arr[:, :, -1][:, :, np.newaxis]
+        alpha_mask = (alpha > 0.0)
+        out = np.divide(integral_arr, alpha, where=alpha_mask)
+        result = (out * 255).astype(np.uint8)[::-1, ...]
+
+        self._ctx.disable(cast(int, mgl.BLEND))
+
+        if save:
+            if save_name is None:
+                save_name = rf'.{PATH_SEP}integral'
+            cv2.imwrite(save_name, result)
+            return None
+        else:
+            return result
+
 
     # region Shader Constants
 

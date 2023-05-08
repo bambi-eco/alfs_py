@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Optional, Callable
 
 from src.core.geo.transform import Transform
+from src.core.rendering.data import Resolution
 
 
 class CameraPositioningMode(Enum):
@@ -51,7 +52,7 @@ class BaseSettings:
     add_background: bool = True
     camera_dist: float = 1.0
     camera_position_mode: CameraPositioningMode = CameraPositioningMode.background_centered
-    resolution: tuple[int, int] = 1024, 1024
+    resolution: Resolution = Resolution(1024, 1024)
     near_clipping: float = 0.1
     far_clipping: float = 10000
     fovy: Optional[float] = None

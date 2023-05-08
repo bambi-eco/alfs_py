@@ -2,7 +2,7 @@ import os
 import time
 from collections import defaultdict
 from functools import cache
-from typing import Final, Optional, Sequence, Callable, cast, Iterable
+from typing import Final, Optional, Sequence, Callable, cast, Iterable, Type
 
 import cv2
 import moderngl as mgl
@@ -13,28 +13,23 @@ from pyrr import Matrix44, Vector3, Quaternion
 from src.core.rendering.camera import Camera
 from src.core.data import ProjectionSettings, FocusAnimationSettings, CameraPositioningMode, \
     ShutterAnimationSettings, BaseSettings, BaseAnimationSettings
-from src.core.rendering.data import TextureData
+from src.core.rendering.data import TextureData, RenderResultMode, Resolution
 from src.core.geo.aabb import AABB
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, CPP_INT_MAX, MAGENTA, BLACK, \
     MAX_TEX_DIM, PATH_SEP
 from src.core.geo.transform import Transform
-from src.core.iters import file_name_gen
-from src.core.rendering.renderer import Renderer, ProjectMode
+from src.core.rendering.renderer import Renderer
 from src.core.rendering.shot import CtxShot
 from src.core.rendering.shot_loader import AsyncShotLoader
 from src.core.util.basic import get_center, int_up, make_quad, gen_checkerboard_tex, get_aabb
 from src.core.util.gltf import gltf_extract
-from src.core.util.image import crop_to_content, split_components, overlay
+from src.core.util.image import split_components, overlay
 from src.core.util.moderngl import img_from_fbo
 from src.core.util.video import video_from_images
 
-_OUTPUT_RESOLUTION: Final[tuple[int, int]] = (1024 * 2, 1024 * 2)  # (1024 * 4, 1024 * 4)
+_OUTPUT_RESOLUTION: Final[Resolution] = Resolution(1024 * 2, 1024 * 2)  # (1024 * 4, 1024 * 4)
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
-
-_FOV: Final[float] = 45.0
-_NEAR_CLIP: Final[float] = 0.1
-_FAR_CLIP: Final[float] = 10000.0
 
 
 class DoneCallback:
@@ -102,8 +97,8 @@ def _get_camera_position(mode: CameraPositioningMode, camera_dist: float, backgr
     center.z += camera_dist
     return center
 
-def _initial_steps(done: DoneCallback, gltf_file: str, shot_json_file: str, mask_file: Optional[str], se: BaseSettings)\
-        -> tuple[mgl.Context, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
+def _initial_steps(done: DoneCallback, gltf_file: str, shot_json_file: str, mask_file: Optional[str],
+                   se: BaseSettings) -> tuple[mgl.Context, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
 
     # region Reading GLTF
 
@@ -245,8 +240,8 @@ def test_projection(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
     print(f'  Projecting shots (Releasing shots after projection: {release_shots})')
     shot_loader = AsyncShotLoader(shots, 15, 8)
-    result = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
-                                     release_shots=release_shots)
+    result = renderer.project_shots(shot_loader, RenderResultMode.shot_only, mask=mask, integral=True, save=False,
+                                    release_shots=release_shots)
     done()
 
     # endregion
@@ -255,7 +250,7 @@ def test_projection(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
     if add_background:
         print('  Rendering background')
-        background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
+        background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
         done()
 
         print('  Laying integral over background')
@@ -292,7 +287,6 @@ def test_projection(gltf_file: str, shot_json_file: str, mask_file: Optional[str
     _release_all(done, ctx, renderer, shots)
 
     done.all_done()
-
 
 def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                          settings: Optional[FocusAnimationSettings] = None) -> None:
@@ -346,11 +340,10 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
         print(f'    Creating frame {i}')
         shots_copy = [shot.create_anew() for shot in shots]
         shot_loader = AsyncShotLoader(shots_copy, 25, 8)
-        result = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
-                                        release_shots=release_shots)
+        result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
         img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
         if add_background:
-            background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
+            background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
             img = overlay(background, img)
         im_pil = Image.fromarray(img)
         frame_file = f'{frame_dir}{i}.png'
@@ -377,7 +370,6 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
     _release_all(done, ctx, renderer, shots)
 
     done.all_done()
-
 
 def test_shutter_animation(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                            settings: Optional[ShutterAnimationSettings] = None) -> None:
@@ -410,7 +402,7 @@ def test_shutter_animation(gltf_file: str, shot_json_file: str, mask_file: Optio
 
     if add_background:
         print('  Rendering background')
-        background = cv2.cvtColor(renderer.render_ground(), cv2.COLOR_BGRA2RGBA)
+        background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
         done()
     else:
         background = None
@@ -448,8 +440,7 @@ def test_shutter_animation(gltf_file: str, shot_json_file: str, mask_file: Optio
         shot_loader = AsyncShotLoader(shots_copy, 25, 8)
 
 
-        result = renderer.project_shots(shot_loader, ProjectMode.SHOT_VIEW_RELATIVE, mask=mask, integral=True, save=False,
-                                        release_shots=release_shots)
+        result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
         img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
         if add_background:
             img = overlay(background, img)
@@ -473,6 +464,78 @@ def test_shutter_animation(gltf_file: str, shot_json_file: str, mask_file: Optio
     _release_all(done, ctx, renderer, shots)
 
     done.all_done()
+
+def test_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
+                    settings: Optional[ProjectionSettings] = None) -> None:
+    done = DoneCallback('    ')
+    print('Start projection process')
+
+    # region Initializing
+
+    print('    Initializing')
+    if settings is None:
+        settings = ProjectionSettings()
+    add_background = settings.add_background
+    release_shots = settings.release_shots
+    show_integral = settings.show_integral
+    output_file = settings.output_file
+    done()
+
+    # endregion
+
+    ctx, _, renderer, shots, mask = _initial_steps(done, gltf_file, shot_json_file, mask_file, settings)
+
+    # region Projecting Shots
+
+    print(f'  Projecting shots (Releasing shots after projection: {release_shots})')
+    shot_loader = AsyncShotLoader(shots, 15, 8)
+    result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
+    done()
+
+    # endregion
+
+    # region Adding Background
+
+    if add_background:
+        print('  Rendering background')
+        background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
+        done()
+
+        print('  Laying integral over background')
+        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+        img = overlay(background, img)
+        im_pil = Image.fromarray(img)
+        done()
+    else:
+        print(' Converting array to PIL image')
+        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
+        im_pil = Image.fromarray(img)
+
+    # endregion
+
+    # region Showing Integral
+
+    if show_integral:
+        print('  Showing integral')
+        im_pil.show('Integral')
+        done()
+
+    # endregion
+
+    # region Saving Integral
+
+    print(f'  Saving integral image to "{output_file}"')
+    if '.' not in output_file:
+        output_file += '.png'
+    im_pil.save(output_file)
+    done()
+
+    # endregion
+
+    _release_all(done, ctx, renderer, shots)
+
+    done.all_done()
+
 
 def test_deferred_shading() -> None:
     file = f'{INPUT_DIR}mesh.glb'
@@ -560,84 +623,35 @@ def test_deferred_shading() -> None:
 
     # TODO: fix second pass not rendering anything
 
-
-def test_fit_to_points(count: int = 1):
-    ctx = mgl.create_context(standalone=True)
-    ctx.enable(cast(int, mgl.DEPTH_TEST))
-
-    gltf_file = f'{INPUT_DIR}mesh.glb'
-    mesh_data, texture_data = gltf_extract(gltf_file)
-
-    center, aabb = get_center(mesh_data.vertices)
-    # center.z = 1
-    # ortho_size = int_up(aabb.width), int_up(aabb.height)
-
-    camera = Camera(orthogonal=False, position=Vector3([center.x, center.y, 100.0]))
-    camera.look_at(center)
-    corners = camera._frustum.corners
-    for i, corner in enumerate(corners):
-        print(f'Corner {chr(65 + i)} = ({corner.x:.9f}, {corner.y:.9f}, {corner.z:.9f})')
-
-    # camera.transform.position.z = 600
-
-    # print(camera.transform.position)
-    # camera.fit_to_points(aabb.corners, 0.0)
-    # print(camera.transform.position)
-    renderer = Renderer(_OUTPUT_RESOLUTION, ctx, camera, mesh_data, texture_data)
-
-    json_file = f'{INPUT_DIR}data\\1\\poses.json'
-    shots = CtxShot.from_json(json_file, ctx, count=count)
-
-    file_name_iter = file_name_gen('.png', f'{OUTPUT_DIR}proj')
-    results = renderer.project_shots(shots, ProjectMode.COMPLETE_VIEW, save=False, save_name_iter=file_name_iter)
-
-    res_center = Vector3([_OUTPUT_RESOLUTION[0] / 2.0, _OUTPUT_RESOLUTION[1] / 2.0, 0.0])
-    res_center_tup = int_up(res_center[0]), int_up(res_center[1])
-    for result in results:
-        crop, delta = crop_to_content(result, return_delta=True)
-        h, w = crop.shape[0:2]
-        c_d = Vector3([w / 2.0, h / 2.0, 0])
-        print(f'tl: {res_center + delta - c_d} | br: {res_center + delta + c_d}')
-
-        res_delta = (int_up(res_center[0] + delta[0]), int_up(res_center[1] + delta[1]))
-        cv2.line(result, res_center_tup, res_delta, (255, 0, 0), 5)
-        result = cv2.resize(result, None, None, 0.5, 0.5)
-        cv2.imshow('delta', result)
-        cv2.waitKey()
-        cv2.destroyAllWindows()
-
-    for shot in shots:
-        shot.release()
-
-    renderer.release()
-    ctx.release()
-
-
 def main() -> None:
     # bambi_data_dir = 'D:\\BambiData\\'
     frame_type = 't'
-    gltf_file = rf'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
-    shot_json_file = rf'D:\BambiData\Processed\Hagenberg\KFV-hgb-Enew\Frames_{frame_type}\poses.json'
-    mask_file = rf'D:\BambiData\Processed\Hagenberg\KFV-hgb-Enew\Frames_{frame_type}\mask_{frame_type}.png'
-    count = 200
-    if frame_type == 't':
-        center = 35380
-    elif frame_type == 'w':
-        center = 35820
-    else:
-        center = count // 2
+    data_set = r'\Hagenberg\NeRF Grid'
 
-    first = center - count // 2
+    gltf_file = rf'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
+    shot_json_file = rf'D:\BambiData\Processed{data_set}\Frames_{frame_type}\poses.json'
+    mask_file = rf'D:\BambiData\Processed{data_set}\Frames_{frame_type}\mask_{frame_type}.png'
+    # count = 200
+    # if frame_type == 't':
+    #     center = 35380
+    # elif frame_type == 'w':
+    #     center = 35820
+    # else:
+    #     center = count // 2
+
+    # first = center - count // 2
+    count = 10000  # 17350
+    first = 0
 
     correction = Transform()
     correction.position.z = 2.0
     correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
     output_file = rf'{OUTPUT_DIR}integral'
-    settings = ProjectionSettings(count=count, initial_skip=first, camera_dist=0.0,
-                                  camera_position_mode=CameraPositioningMode.shot_centered,
-                                  correction=correction, resolution=(1024, 1024), fovy=50.0, aspect_ratio=1.0,
-                                  orthogonal=False, show_integral=True, output_file=output_file)
-    test_projection(gltf_file, shot_json_file, mask_file, settings)
+    settings = ProjectionSettings(count=count, initial_skip=first, camera_dist=10.0, add_background=True,
+                                  camera_position_mode=CameraPositioningMode.background_centered,
+                                  correction=correction, resolution=Resolution(2109, 4096), fovy=50.0, aspect_ratio=1.0,
+                                  orthogonal=True, show_integral=True, output_file=output_file)
+    test_integral(gltf_file, shot_json_file, mask_file, settings)
 
     # fps = 3
     # duration = 2
@@ -650,7 +664,7 @@ def main() -> None:
     #     start_focus=start_focus, end_focus=end_focus, frame_count=duration * fps, fps=fps,
     #     count=count, initial_skip=first, add_background=False, fovy=50.0, camera_dist=0.0, #-17.5,
     #     camera_position_mode=CameraPositioningMode.center_shot, move_camera_with_focus=True,
-    #     resolution=(1024*2, 1024*2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
+    #     resolution=Resolution(1024 * 2, 1024 * 2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
     #     delete_frames=False, first_frame_repetitions=fps, last_frame_repetitions=fps, output_file=output_file)
     # test_focus_animation(gltf_file, shot_json_file, mask_file, settings)
 
@@ -664,7 +678,7 @@ def main() -> None:
     #     count=count, initial_skip=first, add_background=False, fovy=50.0, camera_dist=-22.0,
     #     camera_position_mode=CameraPositioningMode.center_shot,
     #     frame_dir='./.frames/22',
-    #     resolution=(1024*2, 1024*2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
+    #     resolution=Resolution(1024 * 2, 1024 * 2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
     #     correction=correction,
     #     delete_frames=False, output_file=output_file
     # )
