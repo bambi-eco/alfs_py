@@ -2,7 +2,7 @@ import concurrent.futures
 from abc import ABC, abstractmethod
 from typing import Iterable, Optional
 
-from src.core.shot import CtxShot
+from src.core.rendering.shot import CtxShot
 
 
 class ShotLoader(ABC, Iterable[CtxShot]):

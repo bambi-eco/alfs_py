@@ -5,7 +5,7 @@ import numpy as np
 from gltflib import GLTF
 from numpy.typing import NDArray
 
-from src.core.data import MeshData, TextureData
+from src.core.rendering.data import MeshData, TextureData
 from src.core.geo.transform import Transform
 from src.core.util.image import bytes_to_img
 

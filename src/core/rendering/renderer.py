@@ -9,11 +9,12 @@ import numpy as np
 from moderngl import Context, Program, Framebuffer, Texture
 from numpy.typing import NDArray
 
-from src.core.camera import Camera
-from src.core.data import MeshData, TextureData, RenderObject, AABB
+from src.core.rendering.camera import Camera
+from src.core.rendering.data import MeshData, TextureData, RenderObject
+from src.core.geo.aabb import AABB
 from src.core.decorators import incomplete
 from src.core.defs import TRANSPARENT, BLACK, MAGENTA
-from src.core.shot import CtxShot
+from src.core.rendering.shot import CtxShot
 from src.core.util.basic import gen_checkerboard_tex, get_aabb
 from src.core.util.image import overlay
 from src.core.util.moderngl import img_from_fbo

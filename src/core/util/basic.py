@@ -7,7 +7,8 @@ from numpy import ndarray
 from numpy.typing import NDArray
 from pyrr import Vector3
 
-from src.core.data import MeshData, AABB
+from src.core.rendering.data import MeshData
+from src.core.geo.aabb import AABB
 from src.core.defs import Color
 
 

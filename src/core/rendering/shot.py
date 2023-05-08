@@ -10,8 +10,8 @@ from numpy import deg2rad
 from numpy.typing import NDArray
 from pyrr import Vector3, Quaternion, Matrix44
 
-from src.core.camera import Camera
-from src.core.data import TextureData
+from src.core.rendering.camera import Camera
+from src.core.rendering.data import TextureData
 from src.core.defs import PATH_SEP
 from src.core.geo.transform import Transform
 from src.core.util.basic import get_first_valid

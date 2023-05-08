@@ -10,17 +10,19 @@ import numpy as np
 from PIL import Image
 from pyrr import Matrix44, Vector3, Quaternion
 
-from src.core.camera import Camera
-from src.core.data import TextureData, ProjectionSettings, FocusAnimationSettings, CameraPositioningMode, AABB, \
+from src.core.rendering.camera import Camera
+from src.core.data import ProjectionSettings, FocusAnimationSettings, CameraPositioningMode, \
     ShutterAnimationSettings, BaseSettings, BaseAnimationSettings
+from src.core.rendering.data import TextureData
+from src.core.geo.aabb import AABB
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH, CPP_INT_MAX, MAGENTA, BLACK, \
     MAX_TEX_DIM, PATH_SEP
 from src.core.geo.transform import Transform
 from src.core.iters import file_name_gen
-from src.core.renderer import Renderer, ProjectMode
-from src.core.shot import CtxShot
-from src.core.shot_loader import AsyncShotLoader
+from src.core.rendering.renderer import Renderer, ProjectMode
+from src.core.rendering.shot import CtxShot
+from src.core.rendering.shot_loader import AsyncShotLoader
 from src.core.util.basic import get_center, int_up, make_quad, gen_checkerboard_tex, get_aabb
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import crop_to_content, split_components, overlay
@@ -627,15 +629,15 @@ def main() -> None:
 
     first = center - count // 2
 
-    # correction = Transform()
-    # correction.position.z = 2.0
-    # correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
-    # output_file = rf'{OUTPUT_DIR}integral'
-    # settings = ProjectionSettings(count=count, initial_skip=first, camera_dist=0.0,
-    #                               camera_position_mode=CameraPositioningMode.shot_centered,
-    #                               correction=correction, resolution=(1024, 1024), orthogonal=False, show_integral=True,
-    #                               output_file=output_file)
-    # test_projection(gltf_file, shot_json_file, mask_file, settings)
+    correction = Transform()
+    correction.position.z = 2.0
+    correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
+    output_file = rf'{OUTPUT_DIR}integral'
+    settings = ProjectionSettings(count=count, initial_skip=first, camera_dist=0.0,
+                                  camera_position_mode=CameraPositioningMode.shot_centered,
+                                  correction=correction, resolution=(1024, 1024), fovy=50.0, aspect_ratio=1.0,
+                                  orthogonal=False, show_integral=True, output_file=output_file)
+    test_projection(gltf_file, shot_json_file, mask_file, settings)
 
     # fps = 3
     # duration = 2
@@ -652,28 +654,28 @@ def main() -> None:
     #     delete_frames=False, first_frame_repetitions=fps, last_frame_repetitions=fps, output_file=output_file)
     # test_focus_animation(gltf_file, shot_json_file, mask_file, settings)
 
-    shots_grow_func = lambda x: int(np.ceil(np.exp(x * 0.2 - 0.8)))
-    correction = Transform()
-    correction.position.z = 22
-    correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
-    output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_22'
-    settings = ShutterAnimationSettings(
-        shots_grow_func=shots_grow_func, reference_index=center - first, grow_symmetrical=True,
-        count=count, initial_skip=first, add_background=False, fovy=50.0, camera_dist=-22.0,
-        camera_position_mode=CameraPositioningMode.center_shot,
-        frame_dir='./.frames/22',
-        resolution=(1024*2, 1024*2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
-        correction=correction,
-        delete_frames=False, output_file=output_file
-    )
-    test_shutter_animation(gltf_file, shot_json_file, mask_file, settings)
+    # shots_grow_func = lambda x: int(np.ceil(np.exp(x * 0.2 - 0.8)))
+    # correction = Transform()
+    # correction.position.z = 22
+    # correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
+    # output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_22'
+    # settings = ShutterAnimationSettings(
+    #     shots_grow_func=shots_grow_func, reference_index=center - first, grow_symmetrical=True,
+    #     count=count, initial_skip=first, add_background=False, fovy=50.0, camera_dist=-22.0,
+    #     camera_position_mode=CameraPositioningMode.center_shot,
+    #     frame_dir='./.frames/22',
+    #     resolution=(1024*2, 1024*2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
+    #     correction=correction,
+    #     delete_frames=False, output_file=output_file
+    # )
+    # test_shutter_animation(gltf_file, shot_json_file, mask_file, settings)
 
-    settings.correction.position.z = 2.0
-    settings.camera_dist = -2.0
-    settings.output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_2'
-    settings.frame_dir = './.frames/2'
+    # settings.correction.position.z = 2.0
+    # settings.camera_dist = -2.0
+    # settings.output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_2'
+    # settings.frame_dir = './.frames/2'
 
-    test_shutter_animation(gltf_file, shot_json_file, mask_file, settings)
+    # test_shutter_animation(gltf_file, shot_json_file, mask_file, settings)
 
 if __name__ == '__main__':
     main()
