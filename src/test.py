@@ -626,7 +626,7 @@ def test_deferred_shading() -> None:
 def main() -> None:
     # bambi_data_dir = 'D:\\BambiData\\'
     frame_type = 't'
-    data_set = r'\Hagenberg\NeRF Grid'
+    data_set = r'\Hagenberg\NeRF Grid'  # KFV-hgb-Enew'
 
     gltf_file = rf'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
     shot_json_file = rf'D:\BambiData\Processed{data_set}\Frames_{frame_type}\poses.json'
@@ -638,9 +638,8 @@ def main() -> None:
     #     center = 35820
     # else:
     #     center = count // 2
-
     # first = center - count // 2
-    count = 10000  # 17350
+    count = 10000
     first = 0
 
     correction = Transform()
@@ -653,7 +652,7 @@ def main() -> None:
                                   orthogonal=True, show_integral=True, output_file=output_file)
     test_integral(gltf_file, shot_json_file, mask_file, settings)
 
-    # fps = 3
+    # fps = 50
     # duration = 2
     # start_focus = 22
     # end_focus = 2

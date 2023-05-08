@@ -24,6 +24,7 @@ class CtxShot:
 
     tex_data: Optional[TextureData]
     tex: Optional[Texture]
+    _tex_gen_input: Optional[tuple[tuple[int, int], int, bytes]] = None
 
     _ctx: Final[Context]
     _img_file: Optional[str] = None
@@ -106,9 +107,23 @@ class CtxShot:
         if self.tex_data is None and self._can_initialize:  # ensures img_file is set
             self.tex_data = TextureData(self._load_image_from_path(str(self._img_file)))
 
+    def load_tex_input(self):
+        """
+        Determines and caches the input required to create a texture on the GPU.
+        This data is released and removed when the texture gets initialized.
+        """
+        if self._tex_gen_input is None:
+            self._tex_gen_input = self.tex_data.tex_gen_input()
+
     def _init_texture(self):
         if self.tex is None and self._can_initialize:
-            self.tex = self._ctx.texture(*self.tex_data.tex_gen_input(), dtype='f4')
+            if self._tex_gen_input is not None:
+                tex_gen_input = self._tex_gen_input
+                del self._tex_gen_input
+                self._tex_gen_input = None
+            else:
+                tex_gen_input = self.tex_data.tex_gen_input()
+            self.tex = self._ctx.texture(*tex_gen_input, dtype='f4')
 
     @property
     def img(self) -> Optional[NDArray]:
