@@ -3,23 +3,20 @@ from typing import Final, cast
 import cv2
 import moderngl as mgl
 import numpy as np
-from pyrr import Matrix44, Quaternion
+from pyrr import Matrix44
 
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
-from src.core.geo.transform import Transform
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import Resolution
 from src.core.util.basic import get_center, int_up, make_quad
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import split_components
 from src.core.util.moderngl import img_from_fbo
-from src.examples.rendering.data import IntegralSettings, CameraPositioningMode, FocusAnimationSettings, \
-    ShutterAnimationSettings
-from src.examples.rendering.render import render_integral, animate_focus, animate_shutter, project_shots
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = Resolution(1024 * 2, 1024 * 2).as_tuple()
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
+
 
 def test_deferred_shading() -> None:
     file = f'{INPUT_DIR}mesh.glb'
@@ -107,71 +104,10 @@ def test_deferred_shading() -> None:
 
     # TODO: fix second pass not rendering anything
 
+
 def main() -> None:
-    # bambi_data_dir = 'D:\\BambiData\\'
-    frame_type = 't'
-    data_set = r'\Hagenberg\KFV-hgb-Enew'  # NeRF Grid'
+    print('Main')
 
-    gltf_file = rf'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
-    shot_json_file = rf'D:\BambiData\Processed{data_set}\Frames_{frame_type}\poses.json'
-    mask_file = rf'D:\BambiData\Processed{data_set}\Frames_{frame_type}\mask_{frame_type}.png'
-    count = 10
-    if frame_type == 't':
-        center = 35380
-    elif frame_type == 'w':
-        center = 35820
-    else:
-        center = count // 2
-    first = center - count // 2
-
-    correction = Transform()
-    correction.position.z = 2.0
-    correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
-    output_file = rf'{OUTPUT_DIR}integral'
-    settings = IntegralSettings(count=count, initial_skip=first, camera_dist=10.0, add_background=True,
-                                camera_position_mode=CameraPositioningMode.background_centered,
-                                correction=correction, resolution=Resolution(2109, 4096), fovy=50.0, aspect_ratio=1.0,
-                                orthogonal=True, show_integral=True, output_file=output_file)
-    # project_shots(gltf_file, shot_json_file, mask_file, settings)
-    render_integral(gltf_file, shot_json_file, mask_file, settings)
-
-    # fps = 50
-    # duration = 2
-    # start_focus = 22
-    # end_focus = 2
-    # correction = Transform()
-    # correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
-    # output_file = rf'{OUTPUT_DIR}focus_anim'
-    # settings = FocusAnimationSettings(
-    #     start_focus=start_focus, end_focus=end_focus, frame_count=duration * fps, fps=fps,
-    #     count=count, initial_skip=first, add_background=False, fovy=50.0, camera_dist=0.0, #-17.5,
-    #     camera_position_mode=CameraPositioningMode.center_shot, move_camera_with_focus=True,
-    #     resolution=Resolution(1024 * 2, 1024 * 2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
-    #     delete_frames=False, first_frame_repetitions=fps, last_frame_repetitions=fps, output_file=output_file)
-    # animate_focus(gltf_file, shot_json_file, mask_file, settings)
-
-    # shots_grow_func = lambda x: int(np.ceil(np.exp(x * 0.2 - 0.8)))
-    # correction = Transform()
-    # correction.position.z = 22
-    # correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
-    # output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_22'
-    # settings = ShutterAnimationSettings(
-    #     shots_grow_func=shots_grow_func, reference_index=center - first, grow_symmetrical=True,
-    #     count=count, initial_skip=first, add_background=False, fovy=50.0, camera_dist=-22.0,
-    #     camera_position_mode=CameraPositioningMode.center_shot,
-    #     frame_dir='./.frames/22',
-    #     resolution=Resolution(1024 * 2, 1024 * 2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
-    #     correction=correction,
-    #     delete_frames=False, output_file=output_file
-    # )
-    # animate_shutter(gltf_file, shot_json_file, mask_file, settings)
-
-    # settings.correction.position.z = 2.0
-    # settings.camera_dist = -2.0
-    # settings.output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_2'
-    # settings.frame_dir = './.frames/2'
-
-    # test_shutter_animation(gltf_file, shot_json_file, mask_file, settings)
 
 if __name__ == '__main__':
     main()

@@ -7,32 +7,32 @@ from typing import Optional, Iterable, Callable, Sequence, cast, Protocol, Union
 
 import cv2
 import moderngl as mgl
-
 import numpy as np
 from PIL import Image
 from numpy import ndarray
 from pyrr import Vector3
 
-from src.examples.rendering.data import CameraPositioningMode, BaseSettings, BaseAnimationSettings, IntegralSettings, \
-    FocusAnimationSettings, ShutterAnimationSettings
 from src.core.defs import MAGENTA, BLACK, MAX_TEX_DIM, CPP_INT_MAX, PATH_SEP
 from src.core.geo.aabb import AABB
 from src.core.geo.transform import Transform
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import TextureData, RenderResultMode, MeshData
 from src.core.rendering.renderer import Renderer
-
 from src.core.rendering.shot import CtxShot
 from src.core.rendering.shot_loader import AsyncShotLoader
 from src.core.util.basic import get_aabb, gen_checkerboard_tex, int_up, delete_all
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import overlay
 from src.core.util.video import video_from_images
+from src.examples.rendering.data import CameraPositioningMode, BaseSettings, BaseAnimationSettings, IntegralSettings, \
+    FocusAnimationSettings, ShutterAnimationSettings
+
 
 class Releasable(Protocol):
     """
     Static duck typing class for anything that implements a method ``release() -> None``
     """
+
     def release(self) -> None:
         pass
 
@@ -111,10 +111,12 @@ def _cpm_lookup() -> dict[CameraPositioningMode, Callable]:
     return lookup
 
 
-def _get_camera_position(mode: CameraPositioningMode, camera_dist: float, background_aabb: AABB, shots: Sequence[CtxShot]) -> Vector3:
+def _get_camera_position(mode: CameraPositioningMode, camera_dist: float, background_aabb: AABB,
+                         shots: Sequence[CtxShot]) -> Vector3:
     center = _cpm_lookup()[mode](background_aabb, shots)
     center.z += camera_dist
     return center
+
 
 # endregion
 
@@ -257,11 +259,13 @@ def create_video(frame_files: Sequence[str], se: BaseAnimationSettings) -> None:
                       first_frame_repetitions=se.first_frame_repetitions,
                       last_frame_repetitions=se.last_frame_repetitions)
 
+
 # endregion
 
 # region Common processes
 
 S = TypeVar('S', bound=BaseSettings)
+
 
 def _ensure_or_copy_settings(se: Optional[S], cls: Type[S]) -> S:
     if se is None:
@@ -269,9 +273,9 @@ def _ensure_or_copy_settings(se: Optional[S], cls: Type[S]) -> S:
     else:
         return copy(se)
 
+
 def _base_steps(done: DoneCallback, gltf_file: str, shot_json_file: str, mask_file: Optional[str],
                 se: BaseSettings) -> tuple[mgl.Context, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
-
     print(f'  Reading GLTF file from "{gltf_file}"')
     mesh_data, texture_data = read_gltf(gltf_file)
     done()
@@ -302,7 +306,6 @@ def _base_steps(done: DoneCallback, gltf_file: str, shot_json_file: str, mask_fi
 
 
 def _integral_processing(done: DoneCallback, renderer: Renderer, integral: ndarray, se: IntegralSettings) -> None:
-
     # region Adding Background
 
     if se.add_background:
@@ -352,6 +355,7 @@ def _frame_processing(done: DoneCallback, frame_files: Sequence[str], se: BaseAn
         delete_all(frame_files)
         done()
 
+
 # endregion
 
 def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
@@ -386,6 +390,7 @@ def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
     done()
 
     done.total(msg='All done', indent=False)
+
 
 def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                     settings: Optional[IntegralSettings] = None) -> None:
@@ -570,9 +575,8 @@ def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str
             first = reference_index
         last = min(reference_index + cur_grow_size + 1, shot_count)
 
-        shots_copy =  [shot.create_anew() for shot in shots[first:last]]
+        shots_copy = [shot.create_anew() for shot in shots[first:last]]
         shot_loader = make_shot_loader(shots_copy)
-
 
         result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
         img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)

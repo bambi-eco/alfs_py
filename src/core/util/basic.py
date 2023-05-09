@@ -15,7 +15,7 @@ from src.core.defs import Color
 
 def delete_all(files: Union[str, Iterable[str]]) -> None:
     """
-    Tries to delete all given files
+    Tries to delete all given files. Skips over files that cannot be deleted.
     :param files: The files to be deleted
     """
     for file in files:
@@ -23,6 +23,7 @@ def delete_all(files: Union[str, Iterable[str]]) -> None:
             os.remove(file)
         except (FileNotFoundError, OSError):
             pass
+
 
 def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[Any] = None) -> Any:
     """
