@@ -51,6 +51,9 @@ class DoneCallback:
             print(f'All Done [{(current - self.start) * 1000:.3f} ms]')
         self.start = current
 
+def _make_shot_loader(shots: Iterable[CtxShot]) -> Iterable[CtxShot]:
+    return AsyncShotLoader(shots, 32, 8)
+
 @cache
 def _cpm_lookup() -> dict[CameraPositioningMode, Callable]:
     lookup: dict[CameraPositioningMode, Callable] = defaultdict(lambda: Vector3())
@@ -239,7 +242,7 @@ def test_projection(gltf_file: str, shot_json_file: str, mask_file: Optional[str
     # region Projecting Shots
 
     print(f'  Projecting shots (Releasing shots after projection: {release_shots})')
-    shot_loader = AsyncShotLoader(shots, 15, 8)
+    shot_loader = _make_shot_loader(shots)
     result = renderer.project_shots(shot_loader, RenderResultMode.shot_only, mask=mask, integral=True, save=False,
                                     release_shots=release_shots)
     done()
@@ -339,7 +342,7 @@ def test_focus_animation(gltf_file: str, shot_json_file: str, mask_file: Optiona
     for i in range(frame_count):
         print(f'    Creating frame {i}')
         shots_copy = [shot.create_anew() for shot in shots]
-        shot_loader = AsyncShotLoader(shots_copy, 25, 8)
+        shot_loader = _make_shot_loader(shots_copy)
         result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
         img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
         if add_background:
@@ -437,7 +440,7 @@ def test_shutter_animation(gltf_file: str, shot_json_file: str, mask_file: Optio
         last = min(reference_index + cur_grow_size + 1, shot_count)
 
         shots_copy =  [shot.create_anew() for shot in shots[first:last]]
-        shot_loader = AsyncShotLoader(shots_copy, 25, 8)
+        shot_loader = _make_shot_loader(shots_copy)
 
 
         result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
@@ -488,7 +491,7 @@ def test_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
     # region Projecting Shots
 
     print(f'  Projecting shots (Releasing shots after projection: {release_shots})')
-    shot_loader = AsyncShotLoader(shots, 15, 8)
+    shot_loader = _make_shot_loader(shots)
     result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
     done()
 
