@@ -95,7 +95,7 @@ class AsyncShotLoader(ShotLoader):
 
     @staticmethod
     def _load_shot(shot: CtxShot):
-        shot.load_image()
+        # shot.load_image()
         shot.load_tex_input()
 
     def next(self) -> Optional[CtxShot]:

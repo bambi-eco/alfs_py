@@ -10,9 +10,8 @@ moderngl="*"
 numpy="*"
 opencv-python="*"
 pyrr = "*"
-pillow = "*"
-
-[dev-packages]
+Pillow = "*"
+office365-rest-python-client = "*"
 
 [requires]
 python_version = "3.9"

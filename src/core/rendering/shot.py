@@ -62,7 +62,6 @@ class CtxShot:
         self.tex_data = None
         self.tex = None
         if not lazy:
-            self.load_image()
             self._init_texture()
 
     @staticmethod
@@ -112,17 +111,16 @@ class CtxShot:
         Determines and caches the input required to create a texture on the GPU.
         This data is released and removed when the texture gets initialized.
         """
+        self.load_image()
         if self._tex_gen_input is None:
             self._tex_gen_input = self.tex_data.tex_gen_input()
 
     def _init_texture(self):
         if self.tex is None and self._can_initialize:
-            if self._tex_gen_input is not None:
-                tex_gen_input = self._tex_gen_input
-                del self._tex_gen_input
-                self._tex_gen_input = None
-            else:
-                tex_gen_input = self.tex_data.tex_gen_input()
+            self.load_tex_input()
+            tex_gen_input = self._tex_gen_input
+            del self._tex_gen_input
+            self._tex_gen_input = None
             self.tex = self._ctx.texture(*tex_gen_input, dtype='f4')
 
     @property
@@ -244,3 +242,5 @@ class CtxShot:
 
             shots.append(CtxShot(ctx, img_file, Vector3(position), rotation, fov, correction=correction, lazy=lazy))
         return shots
+
+

@@ -83,9 +83,9 @@ class BaseAnimationSettings(BaseSettings):
 
 
 @dataclass
-class ProjectionSettings(BaseSettings):
+class IntegralSettings(BaseSettings):
     """
-    Class storing settings used by the projection process.
+    Class storing settings used by the integral render process.
     Extends upon ``BaseSettings`` parameters.
     :cvar show_integral: Whether to show the resulting integral in a photo viewer
     """
