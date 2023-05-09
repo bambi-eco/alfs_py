@@ -79,7 +79,6 @@ class AsyncShotLoader(ShotLoader):
             self._task_dict[item].cancel()
         self._task_dict.clear()
 
-
     def _add_task(self):
         if self._has_next_task:
             try:
@@ -95,7 +94,7 @@ class AsyncShotLoader(ShotLoader):
 
     @staticmethod
     def _load_shot(shot: CtxShot):
-        shot.load_image()
+        # shot.load_image()
         shot.load_tex_input()
 
     def next(self) -> Optional[CtxShot]:

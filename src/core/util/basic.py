@@ -1,3 +1,4 @@
+import os
 from statistics import fmean
 from typing import Union, Optional, Iterable, Any, Collection, Sequence
 
@@ -10,6 +11,18 @@ from pyrr import Vector3
 from src.core.rendering.data import MeshData
 from src.core.geo.aabb import AABB
 from src.core.defs import Color
+
+
+def delete_all(files: Union[str, Iterable[str]]) -> None:
+    """
+    Tries to delete all given files. Skips over files that cannot be deleted.
+    :param files: The files to be deleted
+    """
+    for file in files:
+        try:
+            os.remove(file)
+        except (FileNotFoundError, OSError):
+            pass
 
 
 def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[Any] = None) -> Any:
@@ -40,7 +53,6 @@ def compare_color(col_a: Union[NDArray, Iterable, int, float], col_b: Union[NDAr
     return (col_a == col_b).all()
 
 
-
 def get_aabb(points: Union[Collection[Vector3], NDArray]) -> AABB:
     """
     Determines the smallest convex AABB for the given points
@@ -57,6 +69,7 @@ def get_aabb(points: Union[Collection[Vector3], NDArray]) -> AABB:
 
     return AABB(min_p, max_p)
 
+
 def get_center(vertices: NDArray) -> tuple[Vector3, AABB]:
     """
     Computes the center position and AABB of a set of vertices
@@ -65,6 +78,7 @@ def get_center(vertices: NDArray) -> tuple[Vector3, AABB]:
     """
     aabb = get_aabb(vertices)
     return aabb.center, aabb
+
 
 def get_vector_center(vectors: Sequence[Vector3]) -> Vector3:
     """
