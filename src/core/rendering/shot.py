@@ -1,7 +1,7 @@
 import copy
 import json
 import pathlib
-from typing import Union, Final, Optional
+from typing import Union, Final, Optional, Any
 
 import cv2
 import numpy as np
@@ -65,8 +65,12 @@ class CtxShot:
             self._init_texture()
 
     @staticmethod
-    def _load_image_from_path(img_path: str) -> NDArray:
-        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+    def _cvt_img(img: NDArray) -> NDArray:
+        """
+        Converts a read image to the RGBA format using a f4 dtype
+        :param img: The image to convert
+        :return: The converted image
+        """
         channel_count = 1 if len(img.shape) == 2 else img.shape[2]
 
         # convert to and guarantee RGBA
@@ -76,8 +80,13 @@ class CtxShot:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-        img = img.astype('f4')
-        return img
+
+        return img.astype('f4')
+
+    @staticmethod
+    def _load_image_from_path(img_path: str) -> NDArray:
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+        return CtxShot._cvt_img(img)
 
     def create_anew(self) -> 'CtxShot':
         """
@@ -187,29 +196,10 @@ class CtxShot:
         return self.camera.get_mat(dtype='f4') * self.get_correction()
 
     @staticmethod
-    def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
-                  fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) -> list['CtxShot']:
-        """
-        Creates context shots from a JSON file
-        :param file: The path of the JSON file to process
-        :param ctx: The context to attach the context shots to
-        :param count: The maximum amount of shots to be created (optional)
-        :param image_dir: The directory of the images referenced in the JSON file (defaults to the JSON files directory)
-        :param fovy: The default fovy value to be used when a JSON entry does not provide one
-        :param correction: The general correction to be applied to all shots (optional)
-        :param lazy: Whether the created shots should be lazy loaded (defaults to ``False``)
-        :return: A list of ``CtxShot`` objects
-        """
+    def _process_json(data: dict, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
+                      fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) \
+            -> tuple[Context, str, Vector3, Quaternion, float, float, Transform, bool]:
         shots = []
-
-        if image_dir is None:
-            image_dir = str(pathlib.Path(file).parent.absolute())
-
-        if correction is None:
-            correction = Transform()
-
-        with open(file, 'r') as f:
-            data = json.load(f)
 
         if count is not None:
             images_dat = data.get('images', [])
@@ -240,7 +230,32 @@ class CtxShot:
 
             img_file = f'{image_dir}{PATH_SEP}{img_file}'
 
-            shots.append(CtxShot(ctx, img_file, Vector3(position), rotation, fov, correction=correction, lazy=lazy))
+            shots.append((ctx, img_file, Vector3(position), rotation, fov, 1, correction, lazy))
         return shots
 
+    @staticmethod
+    def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
+                  fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) -> list['CtxShot']:
+        """
+        Creates context shots from a JSON file
+        :param file: The path of the JSON file to process
+        :param ctx: The context to attach the context shots to
+        :param count: The maximum amount of shots to be created (optional)
+        :param image_dir: The directory of the images referenced in the JSON file (defaults to the JSON files directory)
+        :param fovy: The default fovy value to be used when a JSON entry does not provide one
+        :param correction: The general correction to be applied to all shots (optional)
+        :param lazy: Whether the created shots should be lazy loaded (defaults to ``False``)
+        :return: A list of ``CtxShot`` objects
+        """
+        if image_dir is None:
+            image_dir = str(pathlib.Path(file).parent.absolute())
 
+        if correction is None:
+            correction = Transform()
+
+        with open(file, 'r') as f:
+            data = json.load(f)
+
+        shot_params = CtxShot._process_json(data, ctx, count, image_dir, fovy, correction, lazy)
+
+        return [CtxShot(*shot_param) for shot_param in shot_params]
