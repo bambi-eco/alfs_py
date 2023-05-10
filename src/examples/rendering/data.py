@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Callable
 
+from src.core.defs import ROOT_DIR
 from src.core.geo.transform import Transform
 from src.core.rendering.data import Resolution
 
@@ -76,7 +77,7 @@ class BaseAnimationSettings(BaseSettings):
     """
     frame_count: int = 3600
     fps: float = 30.0
-    frame_dir: str = './.frames'
+    frame_dir: str = f'{ROOT_DIR}/.frames'
     delete_frames: bool = True
     first_frame_repetitions: Optional[int] = None
     last_frame_repetitions: Optional[int] = None

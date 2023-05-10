@@ -2,8 +2,10 @@ import json
 from pathlib import Path
 from typing import Optional, Iterable
 
+import cv2
 import moderngl as mgl
 import numpy as np
+from PIL import Image
 
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import TextureData, MeshData
@@ -130,7 +132,7 @@ def render_integral_sp(config_file: str, gltf_file: str, shot_json_file: str, ma
 
     # region Initializing
 
-    print('    Initializing')
+    print('  Initializing')
     se = _ensure_or_copy_settings(settings, IntegralSettings)
     done()
 
@@ -138,7 +140,7 @@ def render_integral_sp(config_file: str, gltf_file: str, shot_json_file: str, ma
 
     # region Create sharepoint client
 
-    print('    Creating Sharepoint client')
+    print('  Creating Sharepoint client')
     scp = make_sharepoint_client(config_file)
     done()
 
@@ -146,10 +148,10 @@ def render_integral_sp(config_file: str, gltf_file: str, shot_json_file: str, ma
 
     ctx, _, renderer, shots, mask = _base_steps(done, scp, gltf_file, shot_json_file, mask_file, se)
 
-    # region Rendering Integral
+# region Rendering Integral
 
     print(f'  Projecting shots (Releasing shots after projection: {se.release_shots})')
-    shot_loader = make_shot_loader(shots)
+    shot_loader = make_sp_shot_loader(shots)
     result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=se.release_shots)
     done()
 

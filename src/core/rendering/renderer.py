@@ -177,7 +177,7 @@ class Renderer:
     def project_shots_iter(self, shots: Union[CtxShot, Iterable[CtxShot]], mode: RenderResultMode,
                            release_shots: bool = False, mask: Optional[TextureData] = None) -> Iterator[NDArray]:
         """
-        Projects and renders all passed shots
+        Projects and renders all passed shots. Results are in RGBA format.
         :param shots: A single or multiple shots to be projected
         :param mode: The projection mode to be used
         :param release_shots: Whether shots should be released after projection (defaults to ``False``)
@@ -227,6 +227,7 @@ class Renderer:
             del out
 
             if save:
+                result = cv2.cvtColor(result, cv2.COLOR_RGBA2BGRA)
                 cv2.imwrite(next(save_name_iter), result)
             else:
                 return result
@@ -236,6 +237,7 @@ class Renderer:
                 results = None
 
                 def handle_result(res: NDArray) -> None:
+                    res = cv2.cvtColor(res, cv2.COLOR_RGBA2BGRA)
                     cv2.imwrite(next(save_name_iter), res)
                     del res
             else:
@@ -254,7 +256,7 @@ class Renderer:
                         save_name: Optional[Iterator[str]] = None) -> Optional[NDArray]:
         """
         Renders the integral of the given shots on GPU using additive blending. This process will overwrite the current
-        blending function and disable the depth test.
+        blending function and disable the depth test. The image returned will be in the RGBA format.
         :param shots: The shots to be projected and integrated
         :param release_shots: Whether shots should be released after projection (defaults to ``False``)
         :param mask: The mask to be applied to each shot texture (optional)
@@ -289,6 +291,7 @@ class Renderer:
         if save:
             if save_name is None:
                 save_name = rf'.{PATH_SEP}integral'
+            result = cv2.cvtColor(result, cv2.COLOR_RGBA2BGRA)
             cv2.imwrite(save_name, result)
             return None
         else:

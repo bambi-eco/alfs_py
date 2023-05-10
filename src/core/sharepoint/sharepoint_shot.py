@@ -51,7 +51,7 @@ class SharepointCtxShot(CtxShot):
         When the shot was initialized using a file path, loads the associated image
         """
         if self.tex_data is None and self._can_initialize:  # ensures img_file is set
-            self.tex_data = TextureData(self._load_image_from_sharepoint(str(self._img_file), self._spc))
+            self.tex_data = TextureData(self._load_image_from_sharepoint(self._img_file, self._spc))
 
     @staticmethod
     def from_sharepoint_json(json_path: str, spc: SharepointClient, ctx: Context, count: Optional[int] = None,

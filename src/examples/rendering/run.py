@@ -12,7 +12,7 @@ from src.examples.rendering.render_sp import render_integral_sp
 
 def run() -> None:
     bambi_data_dir = r'D:\BambiData'
-    frame_type = 't'
+    frame_type = 'w'
     data_set = r'\Hagenberg\KFV-hgb-Enew'  # NeRF Grid'
 
     gltf_file = rf'{bambi_data_dir}\DEM\Hagenberg\dem_mesh_r2.glb'
@@ -36,9 +36,9 @@ def run() -> None:
                                 correction=correction, resolution=Resolution(2109, 4096), fovy=50.0, aspect_ratio=1.0,
                                 orthogonal=True, show_integral=True, output_file=output_file)
     project_shots(gltf_file, shot_json_file, mask_file, settings)
-    render_integral(gltf_file, shot_json_file, mask_file, settings)
+    # render_integral(gltf_file, shot_json_file, mask_file, settings)
 
-    fps = 50
+    fps = 3
     duration = 2
     start_focus = 22
     end_focus = 2
@@ -53,13 +53,14 @@ def run() -> None:
         delete_frames=False, first_frame_repetitions=fps, last_frame_repetitions=fps, output_file=output_file)
     animate_focus(gltf_file, shot_json_file, mask_file, settings)
 
+    fps = 3
     shots_grow_func = lambda x: int(np.ceil(np.exp(x * 0.2 - 0.8)))
     correction = Transform()
     correction.position.z = 22
     correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
-    output_file = rf'{OUTPUT_DIR}shutter_anim_{frame_type}_22'
+    output_file = rf'{OUTPUT_DIR}shutter_anim'
     settings = ShutterAnimationSettings(
-        shots_grow_func=shots_grow_func, reference_index=center - first, grow_symmetrical=True,
+        shots_grow_func=shots_grow_func, reference_index=center - first, grow_symmetrical=True, fps=fps,
         count=count, initial_skip=first, add_background=False, fovy=50.0, camera_dist=-22.0,
         camera_position_mode=CameraPositioningMode.center_shot,
         resolution=Resolution(1024 * 2, 1024 * 2), aspect_ratio=1.0, orthogonal=False, ortho_size=(65, 65),
@@ -69,14 +70,14 @@ def run() -> None:
     animate_shutter(gltf_file, shot_json_file, mask_file, settings)
 
 def run_sp():
-    frame_type = 'T'
+    frame_type = 'W'
 
     config_file = rf'{INPUT_DIR}sharepoint_config.json'
     gltf_file = rf'MISC\DEM\Hagenberg\dem_mesh_r2.glb'
-    data_root = rf'Processed\FH\2023_04_04_Hagenberg\M30T\NERF grid\Frames_{frame_type}'
+    data_root = rf'Processed\FH\2023_04_04_Hagenberg\M30T\NeRF Grid\Frames_{frame_type}'
     shot_json_file = data_root + r'\poses.json'
     mask_file =  data_root + rf'\mask_{frame_type}.png'
-    count = 100
+    count = 10000
     # if frame_type == 'T':
     #     center = 35380
     # elif frame_type == 'W':

@@ -319,18 +319,16 @@ def _integral_processing(done: DoneCallback, renderer: Renderer, integral: ndarr
 
     if se.add_background:
         print('  Rendering background')
-        background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
+        background = renderer.render_background()
         done()
 
         print('  Laying integral over background')
-        img = cv2.cvtColor(integral, cv2.COLOR_BGRA2RGBA)
-        img = overlay(background, img)
+        img = overlay(background, integral)
         im_pil = Image.fromarray(img)
         done()
     else:
         print(' Converting array to PIL image')
-        img = cv2.cvtColor(integral, cv2.COLOR_BGRA2RGBA)
-        im_pil = Image.fromarray(img)
+        im_pil = Image.fromarray(integral)
 
     # endregion
 
@@ -374,7 +372,7 @@ def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
     # region Initializing
 
-    print('    Initializing')
+    print('  Initializing')
     se = _ensure_or_copy_settings(settings, IntegralSettings)
     done()
 
@@ -408,7 +406,7 @@ def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
     # region Initializing
 
-    print('    Initializing')
+    print('  Initializing')
     se = _ensure_or_copy_settings(settings, IntegralSettings)
     done()
 
@@ -441,7 +439,7 @@ def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
     # region Initializing
 
-    print('    Initializing')
+    print('  Initializing')
     se = _ensure_or_copy_settings(settings, FocusAnimationSettings)
 
     if se.correction is None:
@@ -480,7 +478,7 @@ def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
     # background needs to be rendered only once when camera is not moving
     if add_background and not move_camera_with_focus:
-        background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
+        background = renderer.render_background()
     else:
         background = None
 
@@ -489,12 +487,13 @@ def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
         shots_copy = [shot.create_anew() for shot in shots]
         shot_loader = make_shot_loader(shots_copy)
         result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
-        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
 
         if add_background:
             if move_camera_with_focus:
-                background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
-            img = overlay(background, img)
+                background = renderer.render_background()
+            img = overlay(background, result)
+        else:
+            img = result
 
         im_pil = Image.fromarray(img)
         frame_file = f'{frame_dir}{i}.png'
@@ -531,7 +530,7 @@ def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str
     print('Start shutter animation process')
 
     # region Initializing
-    print('    Initializing')
+    print('  Initializing')
     se = _ensure_or_copy_settings(settings, ShutterAnimationSettings)
     done()
 
@@ -543,7 +542,7 @@ def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
     if se.add_background:
         print('  Rendering background')
-        background = cv2.cvtColor(renderer.render_background(), cv2.COLOR_BGRA2RGBA)
+        background = renderer.render_background()
         done()
     else:
         background = None
@@ -588,16 +587,15 @@ def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str
         shot_loader = make_shot_loader(shots_copy)
 
         result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
-        img = cv2.cvtColor(result, cv2.COLOR_BGRA2RGBA)
         if add_background:
-            img = overlay(background, img)
-        im_pil = Image.fromarray(img)
+            result = overlay(background, result)
+        im_pil = Image.fromarray(result)
         frame_file = f'{frame_dir}{cur_frame}.png'
         im_pil.save(frame_file)
         frame_files.append(frame_file)
 
         del shot_loader
-        del img
+        del result
         del im_pil
 
         cur_frame += 1

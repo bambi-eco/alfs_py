@@ -67,7 +67,7 @@ class CtxShot:
     @staticmethod
     def _cvt_img(img: NDArray) -> NDArray:
         """
-        Converts a read image to the RGBA format using a f4 dtype
+        Converts the given image to the format used by the renderer: RGBA with a f4 dtype.
         :param img: The image to convert
         :return: The converted image
         """
@@ -136,7 +136,7 @@ class CtxShot:
     def img(self) -> Optional[NDArray]:
         """
         :return: If the shot was initialized using a path and that path was not yet loaded ``None``;
-        Otherwise a copy of the associated image
+        Otherwise a copy of the associated image in RGBA format.
         """
         if self.tex_data is None:
             return None
