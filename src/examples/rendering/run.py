@@ -1,12 +1,13 @@
 import numpy as np
 from pyrr import Quaternion
 
-from src.core.defs import OUTPUT_DIR
+from src.core.defs import OUTPUT_DIR, INPUT_DIR
 from src.core.geo.transform import Transform
 from src.core.rendering.data import Resolution
 from src.examples.rendering.data import ShutterAnimationSettings, CameraPositioningMode, IntegralSettings, \
     FocusAnimationSettings
 from src.examples.rendering.render import animate_shutter, project_shots, render_integral, animate_focus
+from src.examples.rendering.render_sp import render_integral_sp
 
 
 def run() -> None:
@@ -67,5 +68,33 @@ def run() -> None:
     )
     animate_shutter(gltf_file, shot_json_file, mask_file, settings)
 
+def run_sp():
+    frame_type = 'T'
+
+    config_file = rf'{INPUT_DIR}sharepoint_config.json'
+    gltf_file = rf'MISC\DEM\Hagenberg\dem_mesh_r2.glb'
+    data_root = rf'Processed\FH\2023_04_04_Hagenberg\M30T\NERF grid\Frames_{frame_type}'
+    shot_json_file = data_root + r'\poses.json'
+    mask_file =  data_root + rf'\mask_{frame_type}.png'
+    count = 100
+    # if frame_type == 'T':
+    #     center = 35380
+    # elif frame_type == 'W':
+    #     center = 35820
+    # else:
+    #     center = count // 2
+    # first = center - count // 2
+    first = 0
+
+    correction = Transform()
+    correction.position.z = 2.0
+    correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
+    output_file = rf'{OUTPUT_DIR}integral'
+    settings = IntegralSettings(count=count, initial_skip=first, camera_dist=10.0, add_background=True,
+                                camera_position_mode=CameraPositioningMode.background_centered,
+                                correction=correction, resolution=Resolution(2109, 4096), fovy=50.0, aspect_ratio=1.0,
+                                orthogonal=True, show_integral=True, output_file=output_file)
+    render_integral_sp(config_file, gltf_file, shot_json_file, mask_file, settings)
+
 if __name__ == '__main__':
-    run()
+    run_sp()

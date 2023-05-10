@@ -138,14 +138,22 @@ def make_shot_loader(shots: Iterable[CtxShot]) -> Iterable[CtxShot]:
     return AsyncShotLoader(shots, 32, 8)
 
 
-def read_gltf(gltf_file: str) -> tuple[MeshData, TextureData]:
+def read_gltf(gltf_file: str) -> tuple[Optional[MeshData], Optional[TextureData]]:
     """
-    Reads a GLTF file and transforms it into mesh and texture data that can be used by the renderer
+    Tries to extract mesh and texture data from the given gltf file
     :param gltf_file: The path pointing at the GLTF file to process
     :return: The extracted mesh and texture data
     """
+    return gltf_extract(gltf_file)
 
-    mesh_data, texture_data = gltf_extract(gltf_file)
+
+def process_render_data(mesh_data: Optional[MeshData], texture_data: Optional[TextureData]) -> tuple[MeshData, TextureData]:
+    """
+    Transforms data extracted from a GLTF file into valid mesh and texture data that can be used by the renderer
+    :param mesh_data: The extracted mesh data
+    :param texture_data: The extracted texture data
+    :return: Processed mesh and texture data ready to be rendered
+    """
 
     if mesh_data is None:
         raise ValueError('Mesh data could not be extracted')
@@ -278,6 +286,7 @@ def _base_steps(done: DoneCallback, gltf_file: str, shot_json_file: str, mask_fi
                 se: BaseSettings) -> tuple[mgl.Context, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
     print(f'  Reading GLTF file from "{gltf_file}"')
     mesh_data, texture_data = read_gltf(gltf_file)
+    mesh_data, texture_data = process_render_data(mesh_data, texture_data)
     done()
 
     print('  Creating MGL context')

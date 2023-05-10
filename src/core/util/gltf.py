@@ -1,3 +1,4 @@
+import io
 from typing import Optional
 from urllib.request import urlopen
 
@@ -88,5 +89,29 @@ def gltf_extract(file: str, transform: Optional[Transform] = None) -> tuple[Opti
     :param transform: The transform to add to the extracted mesh data (optional)
     :return: A tuple containing the results of ``get_mesh_data`` and ``get_texture_data``
     """
-    gltf_file = GLTF.load(file, load_file_resources=True)
-    return gltf_to_mesh_data(gltf_file, transform), gltf_to_texture_data(gltf_file)
+    gltf_data = GLTF.load(file, load_file_resources=True)
+    return gltf_to_mesh_data(gltf_data, transform), gltf_to_texture_data(gltf_data)
+
+def glb_extract_from_bytes(data: bytes, transform: Optional[Transform] = None)-> \
+        tuple[Optional[MeshData], Optional[TextureData]]:
+    """
+    Extracts mesh and texture data from GLB byte data via ``get_mesh_data`` and ``get_texture_data``
+    :param data: Bytes representing GLB data
+    :param transform: The transform to add to the extracted mesh data (optional)
+    :return: A tuple containing the results of ``get_mesh_data`` and ``get_texture_data``
+    """
+    data_stream = io.BytesIO(data)
+    gltf_data = GLTF.read_glb(data_stream, load_file_resources=False)
+    return gltf_to_mesh_data(gltf_data, transform), gltf_to_texture_data(gltf_data)
+
+def gltf_extract_from_bytes(data: bytes, transform: Optional[Transform] = None)-> \
+        tuple[Optional[MeshData], Optional[TextureData]]:
+    """
+    Extracts mesh and texture data from GLTF byte data via ``get_mesh_data`` and ``get_texture_data``
+    :param data: Bytes representing GLTF data
+    :param transform: The transform to add to the extracted mesh data (optional)
+    :return: A tuple containing the results of ``get_mesh_data`` and ``get_texture_data``
+    """
+    data_stream = io.BytesIO(data)
+    gltf_data = GLTF.read_gltf(data_stream, load_file_resources=False)
+    return gltf_to_mesh_data(gltf_data, transform), gltf_to_texture_data(gltf_data)
