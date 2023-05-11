@@ -41,7 +41,7 @@ def make_sp_shot_loader(shots: Iterable[CtxShot]) -> Iterable[CtxShot]:
     Creates a shot loader. Ensures all examples use the same parameters when using a shot loader.
     :return: A shot loader instance ensuring the ``Iterable[CtxShot]`` type.
     """
-    return AsyncShotLoader(shots, 128, 11)
+    return AsyncShotLoader(shots, 128, 8)
 
 
 def read_sp_gltf(gltf_file: str, spc: SharepointClient) -> tuple[MeshData, TextureData]:

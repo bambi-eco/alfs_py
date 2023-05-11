@@ -59,7 +59,7 @@ class SharepointCtxShot(CtxShot):
             try:
                 img_bytes = scp.get_bytes(img_path)
                 break
-            except ClientRequestException:
+            except Exception:  # cannot use ClientRequestException as the package throws raw exceptions too
                 continue  # retry in case of server failure
 
         if img_bytes is not None:

@@ -74,7 +74,7 @@ def run_sp():
 
     config_file = rf'{INPUT_DIR}sharepoint_config.json'
     gltf_file = rf'MISC\DEM\Hagenberg\dem_mesh_r2.glb'
-    data_root = rf'Processed\FH\2023_04_04_Hagenberg\M30T\NeRF Grid\Frames_{frame_type}'
+    data_root = rf'Processed\FH\2023_04_04_Hagenberg\M30T\NeRF grid\Frames_{frame_type}'
     shot_json_file = data_root + r'\poses.json'
     mask_file =  data_root + rf'\mask_{frame_type}.png'
     count = 10000

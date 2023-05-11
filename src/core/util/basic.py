@@ -45,20 +45,20 @@ def compare_color(col_a: Union[NDArray, Iterable, int, float], col_b: Union[NDAr
     :param col_b: The second color
     :return: ``False`` if any component of the two colors differs; otherwise ``True``
     """
-    if not isinstance(col_a, NDArray):
+    if isinstance(col_a, (Iterable, int, float)):
         col_a = np.array(col_a)
-    if not isinstance(col_b, NDArray):
+    if isinstance(col_b, (Iterable, int, float)):
         col_b = np.array(col_b)
     return (col_a == col_b).all()
 
 
-def get_aabb(points: Union[Collection[Vector3], NDArray]) -> AABB:
+def get_aabb(points: Union[Sequence[Vector3], NDArray]) -> AABB:
     """
     Determines the smallest convex AABB for the given points
     :param points: The vertices
     :return: An AABB
     """
-    if not isinstance(points, NDArray):
+    if isinstance(points[0], Vector3):
         points = np.stack(points)
 
     max_x, max_y, max_z = np.max(points, axis=0)
