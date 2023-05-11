@@ -1,12 +1,12 @@
-from dataclasses import dataclass, astuple
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Any, Iterator
 
 import cv2
 import numpy as np
 from moderngl import VertexArray, Buffer, Texture, Program
+from numpy.typing import NDArray
 
-from numpy._typing import NDArray
 from pyrr import Matrix44
 
 from src.core.geo.transform import Transform

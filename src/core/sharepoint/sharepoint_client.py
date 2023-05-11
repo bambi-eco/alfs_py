@@ -12,6 +12,7 @@ from office365.graph_client import GraphClient
 from office365.onedrive.driveitems.driveItem import DriveItem
 #noinspection PyPackageRequirements
 from office365.onedrive.drives.drive import Drive
+#noinspection PyPackageRequirements
 from office365.runtime.queries.update_entity import UpdateEntityQuery
 
 
@@ -150,9 +151,7 @@ class SharepointClient:
         res["items"] = items
         return res
 
-    def upload_file(
-            self, path: str, file_path: str, target_file_name: Optional[str] = None
-    ):
+    def upload_file(self, path: str, file_path: str, target_file_name: Optional[str] = None):
         # https://github.com/vgrem/Office365-REST-Python-Client/blob/master/examples/onedrive/upload_large_file.py
         folder = self.get_item_by_path(path)
         if folder is None or not folder.is_folder:

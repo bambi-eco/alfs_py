@@ -4,7 +4,6 @@ from typing import Union, Optional, Iterable, Any, Collection, Sequence
 
 import cv2
 import numpy as np
-from numpy import ndarray
 from numpy.typing import NDArray
 from pyrr import Vector3
 
@@ -46,9 +45,9 @@ def compare_color(col_a: Union[NDArray, Iterable, int, float], col_b: Union[NDAr
     :param col_b: The second color
     :return: ``False`` if any component of the two colors differs; otherwise ``True``
     """
-    if not isinstance(col_a, ndarray):
+    if not isinstance(col_a, NDArray):
         col_a = np.array(col_a)
-    if not isinstance(col_b, ndarray):
+    if not isinstance(col_b, NDArray):
         col_b = np.array(col_b)
     return (col_a == col_b).all()
 
@@ -59,7 +58,7 @@ def get_aabb(points: Union[Collection[Vector3], NDArray]) -> AABB:
     :param points: The vertices
     :return: An AABB
     """
-    if not isinstance(points, np.ndarray):
+    if not isinstance(points, NDArray):
         points = np.stack(points)
 
     max_x, max_y, max_z = np.max(points, axis=0)

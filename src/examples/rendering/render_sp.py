@@ -2,10 +2,8 @@ import json
 from pathlib import Path
 from typing import Optional, Iterable
 
-import cv2
 import moderngl as mgl
 import numpy as np
-from PIL import Image
 
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import TextureData, MeshData
@@ -19,7 +17,7 @@ from src.core.util.gltf import glb_extract_from_bytes, gltf_extract_from_bytes
 from src.core.util.image import bytes_to_img
 from src.examples.rendering.data import IntegralSettings, BaseSettings
 from src.examples.rendering.render import make_done_callback, _ensure_or_copy_settings, DoneCallback, make_mgl_context, \
-    process_render_data, make_camera, make_shot_loader, _integral_processing, release_all
+    process_render_data, make_camera, _integral_processing, release_all
 
 
 def make_sharepoint_client(config_file: str):

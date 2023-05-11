@@ -104,9 +104,8 @@ def test_deferred_shading() -> None:
 
     # TODO: fix second pass not rendering anything
 
-
 def main() -> None:
-    print('Main')
+    print(f'running {__file__}')
 
 
 if __name__ == '__main__':

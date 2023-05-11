@@ -1,10 +1,9 @@
 import copy
 import json
 import pathlib
-from typing import Union, Final, Optional, Any
+from typing import Union, Final, Optional
 
 import cv2
-import numpy as np
 from moderngl import Context, Texture
 from numpy import deg2rad
 from numpy.typing import NDArray
@@ -24,10 +23,10 @@ class CtxShot:
 
     tex_data: Optional[TextureData]
     tex: Optional[Texture]
-    _tex_gen_input: Optional[tuple[tuple[int, int], int, bytes]] = None
+    _tex_gen_input: Optional[tuple[tuple[int, int], int, bytes]]
 
     _ctx: Final[Context]
-    _img_file: Optional[str] = None
+    _img_file: Optional[str]
     _released: bool
 
     def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
@@ -54,13 +53,15 @@ class CtxShot:
             self.correction = copy.deepcopy(correction)
 
         self._ctx = ctx
-        if isinstance(img, np.ndarray):
-            self.tex_data = TextureData(img.copy())
-        else:
+        if isinstance(img, str):
             self._img_file = img
+        else:
+            self._img_file = None
+            self.tex_data = TextureData(img.copy())
         self.lazy = lazy
         self.tex_data = None
         self.tex = None
+        self._tex_gen_input = None
         if not lazy:
             self._init_texture()
 
@@ -198,8 +199,8 @@ class CtxShot:
     @staticmethod
     def _process_json(data: dict, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
                       fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) \
-            -> tuple[Context, str, Vector3, Quaternion, float, float, Transform, bool]:
-        shots = []
+            -> list[tuple[Context, str, Vector3, Quaternion, float, float, Transform, bool]]:
+        shot_params = []
 
         if count is not None:
             images_dat = data.get('images', [])
@@ -230,8 +231,8 @@ class CtxShot:
 
             img_file = f'{image_dir}{PATH_SEP}{img_file}'
 
-            shots.append((ctx, img_file, Vector3(position), rotation, fov, 1, correction, lazy))
-        return shots
+            shot_params.append((ctx, img_file, Vector3(position), rotation, fov, 1, correction, lazy))
+        return shot_params
 
     @staticmethod
     def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,

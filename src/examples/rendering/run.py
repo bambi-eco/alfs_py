@@ -36,7 +36,7 @@ def run() -> None:
                                 correction=correction, resolution=Resolution(2109, 4096), fovy=50.0, aspect_ratio=1.0,
                                 orthogonal=True, show_integral=True, output_file=output_file)
     project_shots(gltf_file, shot_json_file, mask_file, settings)
-    # render_integral(gltf_file, shot_json_file, mask_file, settings)
+    render_integral(gltf_file, shot_json_file, mask_file, settings)
 
     fps = 3
     duration = 2

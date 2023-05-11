@@ -9,7 +9,7 @@ import cv2
 import moderngl as mgl
 import numpy as np
 from PIL import Image
-from numpy import ndarray
+from numpy.typing import NDArray
 from pyrr import Vector3
 
 from src.core.defs import MAGENTA, BLACK, MAX_TEX_DIM, CPP_INT_MAX, PATH_SEP
@@ -314,7 +314,7 @@ def _base_steps(done: DoneCallback, gltf_file: str, shot_json_file: str, mask_fi
     return ctx, camera, renderer, shots, mask
 
 
-def _integral_processing(done: DoneCallback, renderer: Renderer, integral: ndarray, se: IntegralSettings) -> None:
+def _integral_processing(done: DoneCallback, renderer: Renderer, integral: NDArray, se: IntegralSettings) -> None:
     # region Adding Background
 
     if se.add_background:
