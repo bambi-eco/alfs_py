@@ -51,7 +51,7 @@ def read_sp_gltf(gltf_file: str, spc: SharepointClient) -> tuple[MeshData, Textu
     :param spc: The sharepoint client to be used for retrieving the GLTF file
     :return: The extracted mesh and texture data
     """
-    gltf_bytes = spc.get_bytes(gltf_file)
+    gltf_bytes = spc.get_file_bytes_by_path(gltf_file)
     file_type = Path(gltf_file).suffix.lower()
 
     if file_type == '.glb':
@@ -83,7 +83,7 @@ def read_sp_mask(mask_file: str, spc: SharepointClient) -> TextureData:
     :param spc: The sharepoint client to be used for retrieving the mask
     :return: Texture data resembling the given mask
     """
-    mask_bytes = spc.get_bytes(mask_file)
+    mask_bytes = spc.get_file_bytes_by_path(mask_file)
     mask_img = bytes_to_img(mask_bytes)
     mask_img = mask_img[..., 0].astype('f4')
     mask_img = np.resize(mask_img, (*mask_img.shape, 1))

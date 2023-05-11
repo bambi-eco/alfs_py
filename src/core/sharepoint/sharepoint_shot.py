@@ -56,11 +56,11 @@ class SharepointCtxShot(CtxShot):
 
         img_bytes = None
         for _ in range(tries):
-            try:
-                img_bytes = scp.get_bytes(img_path)
+            img_bytes = scp.get_file_bytes_by_path(img_path)
+            if img_bytes is None:
+                continue
+            else:
                 break
-            except Exception:  # cannot use ClientRequestException as the package throws raw exceptions too
-                continue  # retry in case of server failure
 
         if img_bytes is not None:
             data_arr = np.frombuffer(img_bytes, dtype=np.uint8)
@@ -92,13 +92,15 @@ class SharepointCtxShot(CtxShot):
         org_path = pathlib.Path(json_path)
         alt_path = org_path.with_suffix('.jsont')
 
-        spc.rename(json_path, alt_path.name)
+        spc.rename_item_by_path(json_path, alt_path.name)
 
-        json_bytes = spc.get_bytes(str(alt_path))
+        json_bytes = spc.get_file_bytes_by_path(str(alt_path))
+        if json_bytes is None:
+            raise ValueError(f'The server did not successfully retrieve the JSON file at {json_path}')
         data = json.loads(json_bytes)
 
         shot_params = CtxShot._process_json(data, ctx, count, image_dir, fovy, correction, lazy)
 
         # revert renaming
-        spc.rename(str(alt_path), org_path.name)
+        spc.rename_item_by_path(str(alt_path), org_path.name)
         return [SharepointCtxShot(spc, *shot_param) for shot_param in shot_params]
