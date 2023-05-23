@@ -1,8 +1,9 @@
 import os.path
 import tempfile
-from typing import Any, Dict, Generator, Optional, TypeVar, Callable, Union, Type
+from typing import Generator, Optional, TypeVar, Callable, Union, Type, Final
 
 import msal
+
 # noinspection PyPackageRequirements
 from office365.entity_collection import EntityCollection
 # noinspection PyPackageRequirements
@@ -16,7 +17,6 @@ from office365.onedrive.sites.site import Site
 # noinspection PyPackageRequirements
 from office365.runtime.queries.update_entity import UpdateEntityQuery
 
-
 class SharepointClient:
     _client_id: str
     _client_secret: str
@@ -28,8 +28,11 @@ class SharepointClient:
     _site: Site
     _drive: Drive
 
-    _T1 = TypeVar('_T1', covariant=True)
-    _T2 = TypeVar('_T2', covariant=True)
+    _T1 = TypeVar('_T1')
+    _T2 = TypeVar('_T2')
+
+    _URL_BASE: Final[str] = 'https://login.microsoftonline.com/'
+    _SCOPE: Final[str] = 'https://graph.microsoft.com/.default'
 
     def __init__(self, client_id: str, client_secret: str, tenant_id: str, site: str):
         """
@@ -44,17 +47,13 @@ class SharepointClient:
         self._tenant_id = tenant_id
         self._site_str = site
         self._connected = False
+        self._connect()
 
     def _get_token(self) -> dict:
-        authority_url = f"https://login.microsoftonline.com/{self._tenant_id}"
-        app = msal.ConfidentialClientApplication(
-            authority=authority_url,
-            client_id=self._client_id,
-            client_credential=self._client_secret,
-        )
-        token = app.acquire_token_for_client(
-            scopes=["https://graph.microsoft.com/.default"]
-        )
+        authority_url = f'{self._URL_BASE}{self._tenant_id}'
+        app = msal.ConfidentialClientApplication(authority=authority_url, client_id=self._client_id,
+                                                 client_credential=self._client_secret)
+        token = app.acquire_token_for_client(scopes=[self._SCOPE])
         return token
 
     def _connect(self) -> None:
@@ -114,15 +113,31 @@ class SharepointClient:
         :param identifier: The identifier associated with the item to retrieve
         :return: If the id is invalid or retrieval was unsuccessful ``None``; otherwise the associated item
         """
-        return self._try_or_default(lambda: self._drive.items[identifier].children.get().execute_query())
+        return self._try_or_default(lambda: self._drive.items[identifier].get().execute_query())
 
-    def get_item_by_path(self, path: str) -> Optional[DriveItem]:
+    def get_item_by_path(self, item_path: str) -> Optional[DriveItem]:
         """
         Retrieves a drive item by its server relative path
-        :param path: The server relative path pointing at the item to retrieve
+        :param item_path: The server relative path pointing at the item to retrieve
         :return: If the path is invalid or retrieval was unsuccessful ``None``; otherwise the associated item
         """
-        return self._try_or_default(self._drive.root.get_by_path(path).get().execute_query())
+        return self._try_or_default(lambda: self._drive.root.get_by_path(item_path).get().execute_query())
+
+    def item_exists_by_id(self, identifier: str) -> bool:
+        """
+        Checks whether an item with the given identifier exists on the Sharepoint
+        :param identifier: The identifier associated with the file to check
+        :return: Whether the item exists
+        """
+        return self.get_item_by_id(identifier) is not None
+
+    def item_exists_by_path(self, item_path: str) -> bool:
+        """
+        Checks whether an item with the given identifier exists on the Sharepoint
+        :param item_path: The path pointing at the position to check
+        :return: Whether the item exists
+        """
+        return self.get_item_by_path(item_path) is not None
 
     def get_file_bytes(self, item: DriveItem) -> Optional[bytes]:
         """
@@ -131,16 +146,16 @@ class SharepointClient:
         :param item: The drive item whose content to retrieve
         :return: If there is an error retrieving the data ``None``; otherwise the contents of the given item as raw bytes
         """
-        return self._try_or_default(item.get_content().execute_query().value)
+        return self._try_or_default(lambda: item.get_content().execute_query().value)
 
-    def get_file_bytes_by_id(self, file_id: str) -> Optional[bytes]:
+    def get_file_bytes_by_id(self, identifier: str) -> Optional[bytes]:
         """
         Downloads and returns the file associated with the given identifier as raw bytes. Does not work for directories.
         !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
-        :param file_id: The identifier associated with the file to retrieve
+        :param identifier: The identifier associated with the file to retrieve
         :return: If there is an error retrieving the data ``None``; otherwise the contents of the given file as raw bytes
         """
-        return self.get_file_bytes(self.get_item_by_id(file_id))
+        return self.get_file_bytes(self.get_item_by_id(identifier))
 
     def get_file_bytes_by_path(self, file_path: str) -> Optional[bytes]:
         """
@@ -181,15 +196,15 @@ class SharepointClient:
         item = self.get_item_by_id(identifier)
         return self.download_item(item)
 
-    def download_item_by_path(self, path: str) -> Optional[str]:
+    def download_item_by_path(self, item_path: str) -> Optional[str]:
         """
         Downloads the item associated with the given server relative path to a temporary directory and returns its local location.
         !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
-        :param path: The server relative path pointing at the item to download
+        :param item_path: The server relative path pointing at the item to download
         :return: If the item was not downloaded successfully ``None``; otherwise the location to which the item has been
         downloaded to
         """
-        item = self.get_item_by_path(path)
+        item = self.get_item_by_path(item_path)
         return self.download_item(item)
 
     def rename_item(self, item: DriveItem, new_name: str) -> bool:
@@ -226,51 +241,76 @@ class SharepointClient:
         item = self.get_item_by_path(item_path)
         return self.rename_item(item, new_name)
 
-
-
-    def get_content(self, path: str) -> Dict[str, Any]:
+    def get_children(self, item: DriveItem) -> list[DriveItem]:
         """
-        Method for getting the content of a given sharepoint folder
-        :param path: of folder for which content should be retrieved
-        :return: dictionary describing all items
+        Queries and returns a list of a child items within a given folder. Returns an empty list if the given path
+        points at a non-dictionary item.
+        :param item: The item whose children to return
+        :return: If the item could not be retrieved ``None``; otherwise a list of all direct children of the given item
         """
-        res = {}
-        item = self.get_item_by_path(path)
-        if item is None:
-            return res
-        children = item.children.get().execute_query()
+        def func():
+            items = []
+            children = item.children.get().execute_query()
+            child: DriveItem
+            for child in children:
+                items.append(child)
+            return items
 
-        items = []
-        for child in children:
-            inner_dict = {
-                "name": child.name,
-                "isDir": child.is_folder,
-                "webUrl": child.web_url,
-            }
-            items.append(inner_dict)
-        res["items"] = items
-        return res
+        return self._try_or_default(func)
 
-    def upload_file(self, path: str, file_path: str, target_file_name: Optional[str] = None):
+    def get_children_by_id(self, identifier: str) -> list[DriveItem]:
+        """
+        Queries and returns a list of a child items within a given folder. Returns an empty list if the given path
+        points at a non-dictionary item.
+        :param identifier: The identifier associated with the item whose children to return
+        :return: If the item could not be retrieved ``None``; otherwise a list of all direct children of the given item
+        """
+        item = self.get_item_by_id(identifier)
+        return self.get_children(item)
+
+    def get_children_by_path(self, item_path: str) -> list[DriveItem]:
+        """
+        Queries and returns a list of a child items within a given folder. Returns an empty list if the given path
+        points at a non-dictionary item.
+        :param item_path: The server relative path pointing at the item whose children to return
+        :return: If the item could not be retrieved ``None``; otherwise a list of all direct children of the given item
+        """
+        item = self.get_item_by_path(item_path)
+        return self.get_children(item)
+
+    def upload_file(self, target_dir_path: str, file_path: str, overwrite: bool = False, chunk_size: int = 5242880,
+                    progress_callback: Optional[Callable[[int], None]] = None) -> Optional[DriveItem]:
+        """
+        Uploads a file to given directory on the Sharepoint. The upload itself is carried out by segmenting the given
+        data into chunks.
+        :param target_dir_path: The server relative path of the directory the given file should be saved to
+        :param file_path: The local path pointing at the file to upload
+        :param overwrite: Whether to allow overwriting existing files (defaults to ``True``)
+        :param chunk_size: The chunk size to be used for segmenting the data to upload (defaults to ``5242880``)
+        :param progress_callback: A callback to be called when bytes are uploaded (optional). The first and only
+        parameter represents the amount of uploaded bytes.
+        :return: If the upload was not successful or any of the given paths are invalid ``None``; otherwise the item
+        associated with the just uploaded file.
+        """
+        
         # https://github.com/vgrem/Office365-REST-Python-Client/blob/master/examples/onedrive/upload_large_file.py
-        folder = self.get_item_by_path(path)
+        folder = self.get_item_by_path(target_dir_path)
         if folder is None or not folder.is_folder:
-            raise Exception(f"Unknown folder for path: {path}")
-        file_path = os.path.normpath(file_path)
+            raise Exception(f'Invalid target directory path: {target_dir_path}')
+
         if not os.path.exists(file_path) or not os.path.isfile(file_path):
-            raise Exception(f"Unknown file for path: {file_path}")
-        chunk_size = 5 * 1024 * 1024
+            raise Exception(f'Invalid file path. Target does not exist or is not a file: {file_path}')
 
-        def print_progress(range_pos):
-            print("{0} bytes uploaded".format(range_pos))
+        if not overwrite:
+            file_name = os.path.basename(file_path)
+            to_be_file_path = os.path.join(target_dir_path, file_name)
+            if self.item_exists_by_path(to_be_file_path):
+                raise Exception(f'The target directory already contains a file named "{file_name}" and overwriting was specifically prohibited')
 
-        res = (
-            folder.resumable_upload(
-                os.path.normpath(file_path),
-                chunk_size=chunk_size,
-                chunk_uploaded=print_progress,
-            )
-            .get()
-            .execute_query()
-        )
-        return res
+        def func():
+            item = folder.resumable_upload(file_path, chunk_size=chunk_size, chunk_uploaded=progress_callback)
+            item.execute_query()
+            return item
+
+        return self._try_or_default(func)
+
