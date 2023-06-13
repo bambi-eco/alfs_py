@@ -119,11 +119,11 @@ def make_quad() -> MeshData:
     return MeshData(vertices=vertices, indices=indices, uvs=uvs)
 
 
-def int_up(val: float) -> int:
+def nearest_int(val: float) -> int:
     """
-    Rounds a float up and casts it to an integer
-    :param val: The value to round up
-    :return: The rounded up integer
+    Rounds a float to its nearest integer. A value of a half will be rounded up, i.e., this function rounds half up.
+    :param val: The value to round
+    :return: The nearest integer of the given value
     """
     return int(val + 0.5)
 

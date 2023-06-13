@@ -3,13 +3,14 @@ from typing import Final, cast
 import cv2
 import moderngl as mgl
 import numpy as np
-from pyrr import Matrix44
+from pyrr import Matrix44, Vector3
 
+from src.core.conv.coord_conversion import pixel_to_world_coord, world_to_pixel_coord
 from src.core.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import Resolution
-from src.core.util.basic import get_center, int_up, make_quad
+from src.core.util.basic import get_center, nearest_int, make_quad
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import split_components
 from src.core.util.moderngl import img_from_fbo
@@ -28,7 +29,7 @@ def test_deferred_shading() -> None:
 
     center, aabb = get_center(mesh_data.vertices)
     center.z = 750
-    ortho_size = int_up(aabb.width), int_up(aabb.height)
+    ortho_size = nearest_int(aabb.width), nearest_int(aabb.height)
 
     camera = Camera(orthogonal=True, orthogonal_size=ortho_size, position=center)
     projection = camera.get_proj()
@@ -104,14 +105,25 @@ def test_deferred_shading() -> None:
 
     # TODO: fix second pass not rendering anything
 
+def test_coords_conv() -> None:
+    gltf_file = r'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
+    mesh, _ = gltf_extract(gltf_file)
+    camera_position = Vector3([-166, 100, 518.9361845649696])
+    camera = Camera(fovy=60.0, aspect_ratio=1.0, position=camera_position)
+    image_res = np.array((20, 20))
+
+    input_coord = 5, 15
+    world_coord = pixel_to_world_coord(input_coord[0], input_coord[1], image_res[0], image_res[1], mesh, camera)
+    pixel_coord = world_to_pixel_coord(world_coord, image_res[0], image_res[1], camera)
+
+    print(f'{input_coord} -> {world_coord} -> {pixel_coord}')
+
 def main() -> None:
     print(f'running {__file__}')
+    test_coords_conv()
 
 
 if __name__ == '__main__':
     main()
 
-# TODO: Animation of increasing shot count with amount of used shots growing exponentially ( ceil(exp(x * 0.2 - 0.8)) )
-# TODO: Test direct sharepoint loading
-# TODO: Maybe try shifting integral calculations onto GPU using additional shader
 # TODO: Fix shot reloading for future dgx use

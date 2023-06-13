@@ -12,6 +12,7 @@ opencv-python="*"
 pyrr = "*"
 Pillow = "*"
 office365-rest-python-client = "*"
+trimesh = {extras = ["easy"], version = "*"}
 
 [requires]
 python_version = "3.9"

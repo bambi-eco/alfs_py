@@ -20,7 +20,7 @@ from src.core.rendering.data import TextureData, RenderResultMode, MeshData
 from src.core.rendering.renderer import Renderer
 from src.core.rendering.shot import CtxShot
 from src.core.rendering.shot_loader import AsyncShotLoader
-from src.core.util.basic import get_aabb, gen_checkerboard_tex, int_up, delete_all
+from src.core.util.basic import get_aabb, gen_checkerboard_tex, nearest_int, delete_all
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import overlay
 from src.core.util.video import video_from_images
@@ -218,7 +218,7 @@ def make_camera(mesh_aabb: AABB, shots: Sequence[CtxShot], se: BaseSettings) -> 
     """
     if se.orthogonal:
         # ensure valid ortho_size
-        ortho_size = se.ortho_size if se.ortho_size is not None else (int_up(mesh_aabb.width), int_up(mesh_aabb.height))
+        ortho_size = se.ortho_size if se.ortho_size is not None else (nearest_int(mesh_aabb.width), nearest_int(mesh_aabb.height))
     else:
         ortho_size = se.ortho_size
 
