@@ -236,7 +236,7 @@ def read_mask(mask_file: str) -> TextureData:
     mask_img = cv2.imread(mask_file)
     mask_img = mask_img[..., 0].astype('f4')
     mask_img = np.resize(mask_img, (*mask_img.shape, 1))
-    mask_img /= 255.0
+    mask_img = np.where(mask_img < 255.0, 0.0, 1.0)
     return TextureData(mask_img)
 
 

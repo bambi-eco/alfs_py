@@ -1,7 +1,7 @@
 import copy
 import json
 import pathlib
-from typing import Union, Final, Optional
+from typing import Union, Final, Optional, Collection
 
 import cv2
 from moderngl import Context, Texture
@@ -228,6 +228,8 @@ class CtxShot:
 
             if fov is None:
                 fov = fovy
+            elif isinstance(fov, list):
+                fov = fov[0]
 
             img_file = f'{image_dir}{PATH_SEP}{img_file}'
 
