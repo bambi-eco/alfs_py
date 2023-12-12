@@ -12,6 +12,7 @@ class Transform:
     _position: Vector3
     _rotation: Quaternion
     _scale: Vector3
+    dtype: Any
 
     def __init__(self, position: Optional[Vector3] = None, rotation: Optional[Quaternion] = None,
                  scale: Optional[Vector3] = None, dtype: Any ='f4'):
@@ -25,6 +26,7 @@ class Transform:
         self._position = Vector3(position) if position is not None else Vector3([0.0, 0.0, 0.0], dtype=dtype)
         self._rotation = Quaternion(rotation) if rotation is not None else Quaternion([0.0, 0.0, 0.0, 1.0], dtype=dtype)
         self._scale = Vector3(scale) if scale is not None else Vector3([1.0, 1.0, 1.0], dtype=dtype)
+        self.dtype = dtype
 
     @staticmethod
     def from_up_forward(up: Vector3, forward: Vector3, position: Optional[Vector3] = None,
@@ -75,7 +77,6 @@ class Transform:
             dtype = self._scale.dtype
         return Matrix44.from_scale(self._scale, dtype=dtype)
 
-
     def mat(self, dtype: Any = None) -> Matrix44:
         """
         :param dtype: The data type to be used for the matrix (optional)
@@ -84,7 +85,7 @@ class Transform:
         if dtype is None:
             return self.trans_mat * self.rot_mat * self.scale_mat
         else:
-            return (self.trans_mat * self.rot_mat * self.scale_mat).astype(dtype)
+            return Matrix44((self.trans_mat * self.rot_mat * self.scale_mat), dtype=dtype)
 
     @property
     def up(self) -> Vector3:

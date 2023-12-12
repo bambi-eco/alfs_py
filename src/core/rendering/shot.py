@@ -40,7 +40,8 @@ class CtxShot:
         :param rotation: The rotation of the camera associated with the shot
         :param fovy: The field of view in y direction in degrees of the camera associated with the shot (defaults to 60)
         :param aspect_ratio: The aspect ratio of the view of the camera associated with the shot (defaults to 1)
-        :param correction: Correction transform to be applied to the shot (optional)
+        :param correction: Correction transform to be applied to the shot (optional). The translation stated in the
+        correction transform is inverted to make it move according to the background coordinate system.
         :param lazy: Whether the shot should be loaded lazily (defaults to ``False``). This also loads the image lazily
         from the drive when an image-file-path is given.
         """
@@ -50,7 +51,7 @@ class CtxShot:
         if correction is None:
             self.correction = Transform(dtype='f4')
         else:
-            self.correction = copy.deepcopy(correction)
+            self.correction = Transform(correction.position, correction.rotation, correction.scale, dtype='f4')
 
         self._ctx = ctx
         if isinstance(img, str):
@@ -188,7 +189,7 @@ class CtxShot:
         """
         :return: A matrix representing the correction to be applied to this shot
         """
-        return self.correction.mat(dtype='f4')
+        return self.correction.trans_mat.inverse * self.correction.rot_mat
 
     def get_mat(self) -> Matrix44:
         """

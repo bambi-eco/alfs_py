@@ -147,7 +147,8 @@ def read_gltf(gltf_file: str) -> tuple[Optional[MeshData], Optional[TextureData]
     return gltf_extract(gltf_file)
 
 
-def process_render_data(mesh_data: Optional[MeshData], texture_data: Optional[TextureData]) -> tuple[MeshData, TextureData]:
+def process_render_data(mesh_data: Optional[MeshData],
+                        texture_data: Optional[TextureData]) -> tuple[MeshData, TextureData]:
     """
     Transforms data extracted from a GLTF file into valid mesh and texture data that can be used by the renderer
     :param mesh_data: The extracted mesh data
@@ -218,7 +219,8 @@ def make_camera(mesh_aabb: AABB, shots: Sequence[CtxShot], se: BaseSettings) -> 
     """
     if se.orthogonal:
         # ensure valid ortho_size
-        ortho_size = se.ortho_size if se.ortho_size is not None else (nearest_int(mesh_aabb.width), nearest_int(mesh_aabb.height))
+        ortho_size = se.ortho_size if se.ortho_size is not None else \
+                     (nearest_int(mesh_aabb.width), nearest_int(mesh_aabb.height))
     else:
         ortho_size = se.ortho_size
 

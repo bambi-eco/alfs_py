@@ -1,12 +1,12 @@
 import time
 
-import src.test as src
+from src.test import main as test_main
 
 
 def main() -> None:
     start_t = time.time()
 
-    src.main()
+    test_main()
 
     end_t = time.time()
     dur = end_t - start_t

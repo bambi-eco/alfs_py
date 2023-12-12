@@ -105,6 +105,7 @@ def test_deferred_shading() -> None:
 
     # TODO: fix second pass not rendering anything
 
+
 def test_coords_conv() -> None:
     gltf_file = r'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
     mesh, _ = gltf_extract(gltf_file)
@@ -117,6 +118,7 @@ def test_coords_conv() -> None:
     pixel_coord = world_to_pixel_coord(world_coord, image_res[0], image_res[1], camera)
 
     print(f'{input_coord} -> {world_coord} -> {pixel_coord}')
+
 
 def main() -> None:
     print(f'running {__file__}')
