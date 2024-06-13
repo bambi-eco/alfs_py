@@ -18,6 +18,7 @@ from src.core.util.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import split_components
 from src.core.util.moderngl import img_from_fbo
+from src.core.util.pyrr import rand_quaternion
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = Resolution(1024 * 2, 1024 * 2).as_tuple()
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -120,7 +121,8 @@ def test_coords_conv() -> None:
             'Data', 'dem', 'dem_mesh_r2.glb'
         )
         camera_position = Vector3([450.9566076750634, 5.060010188259184, 495.5558088407927])  # [0, 0, 500]
-        camera_rotation = Quaternion.from_eulers([0.0, 0.0, 57.841499999999826])  # [360.1, 0, 57.841499999999826]
+        camera_eulers = [360.1, 0, 57.841499999999826]
+        camera_rotation = Quaternion.from_eulers([np.deg2rad(e % 360.0) for e in camera_eulers])
         camera = Camera(
             position=camera_position, rotation=camera_rotation,
             fovy=48.887902511473634, aspect_ratio=1.0,
@@ -135,7 +137,7 @@ def test_coords_conv() -> None:
 
     with TimeTracker("Cast rays", False):
         errors = []
-        for _ in range(1):
+        for _ in range(100):
             x = random.random() * image_res[0]
             if random.random() > 0.5:
                 x = int(x)
@@ -145,15 +147,18 @@ def test_coords_conv() -> None:
                 y = int(y)
             input_coord = x, y
 
+            camera_rotation = rand_quaternion(min_x=-45, max_x=45, min_y=0.0, max_y=0.0, min_z=-45, max_z=45)
+            camera.transform.rotation = camera_rotation
+
             world_coord = pixel_to_world_coord(input_coord[0], input_coord[1], image_res[0], image_res[1], tri_mesh, camera)
             pixel_coord = world_to_pixel_coord(world_coord, image_res[0], image_res[1], camera, ensure_int=False)
 
             error = ((input_coord[0] - pixel_coord[0]) ** 2 + (input_coord[1] - pixel_coord[1]) ** 2) ** 0.5
 
-            print(f'({input_coord[0]:8.3f}, {input_coord[1]:8.3f}) -> '
-                  f'({world_coord[0]:8.3f}, {world_coord[1]:8.3f}, {world_coord[2]:8.3f}) -> '
-                  f'({pixel_coord[0]:8.3f}, {pixel_coord[1]:8.3f})'
-                  f' | error: {error}')
+            # print(f'({input_coord[0]:8.3f}, {input_coord[1]:8.3f}) -> '
+            #       f'({world_coord[0]:8.3f}, {world_coord[1]:8.3f}, {world_coord[2]:8.3f}) -> '
+            #       f'({pixel_coord[0]:8.3f}, {pixel_coord[1]:8.3f})'
+            #       f' | error: {error}')
 
             errors.append(error)
 

@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import trimesh
 from numpy.typing import NDArray
-from pyrr import Vector3, Vector4
+from pyrr import Vector3, Vector4, Matrix44
 from trimesh import Trimesh
 
 from src.core.conv.data import PixelOrigin, Distortion
@@ -151,23 +151,25 @@ def world_to_pixel_coord(coord: Vector3, width: int, height: int, camera: Camera
     :param viewport_origin: The origin of the viewport (defaults to top left)
     :return: The pixel coordinates of the projected world point
     """
-    coord = Vector4.from_vector3(coord, 1.0)  # add w coordinate
-    proj = camera.get_mat() * coord  # project result
-    proj /= proj[3]   # perspective division to transform homogeneous to cartesian
+    # transform coordinate to camera space
+    camera_coord = camera.transform.rotation.inverse * (coord - camera.transform.position)
+    camera_coord = Vector4.from_vector3(camera_coord, w=1.0)
 
-    # viewport translation (top left)
-    res_x = (proj[0] + 1) * width / 2.0
-    res_y = (1 - proj[1]) * height / 2.0
+    # project coordinate onto the normalized camera plane
+    ndc_coord = camera.get_proj() * camera_coord
+    ndc_coord /= ndc_coord[3]
+
+    # convert normalized coordinates to top-left oriented pixel coordinates
+    pixel_coord = (ndc_coord.x + 1.0) * width / 2.0, height - (ndc_coord.y + 1) / 2 * height
 
     if viewport_origin != PixelOrigin.TopLeft:
-        res_2d = cvt_pixel_origin(res_x, res_y, width, height, PixelOrigin.TopLeft, viewport_origin)
-    else:
-        res_2d = (res_x, res_y)
+        pixel_coord = cvt_pixel_origin(pixel_coord[0], pixel_coord[1], width, height,
+                                       PixelOrigin.TopLeft, viewport_origin)
 
     if ensure_int:
-        res_2d = (nearest_int(res_2d[0]), nearest_int(res_2d[1]))
+        pixel_coord = (nearest_int(pixel_coord[0]), nearest_int(pixel_coord[1]))
 
-    return res_2d
+    return pixel_coord
 
 
 def pixel_to_world_coord(x: float, y: float, width: int, height: int, mesh: Union[MeshData, Trimesh],
