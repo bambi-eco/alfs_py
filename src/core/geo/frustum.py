@@ -3,7 +3,7 @@ from typing import Optional, Final
 from numpy import deg2rad
 from pyrr import Vector3, Quaternion, Matrix44, Vector4
 
-from src.core.defs import FORWARD, StrEnum
+from src.core.util.defs import FORWARD, StrEnum
 from src.core.geo.quad import Quad
 from src.core.geo.transform import Transform
 

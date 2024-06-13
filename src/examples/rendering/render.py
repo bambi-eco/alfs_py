@@ -12,7 +12,6 @@ from PIL import Image
 from numpy.typing import NDArray
 from pyrr import Vector3
 
-from src.core.defs import MAGENTA, BLACK, MAX_TEX_DIM, CPP_INT_MAX, PATH_SEP
 from src.core.geo.aabb import AABB
 from src.core.geo.transform import Transform
 from src.core.rendering.camera import Camera
@@ -21,6 +20,7 @@ from src.core.rendering.renderer import Renderer
 from src.core.rendering.shot import CtxShot
 from src.core.rendering.shot_loader import AsyncShotLoader
 from src.core.util.basic import get_aabb, gen_checkerboard_tex, nearest_int, delete_all
+from src.core.util.defs import MAGENTA, BLACK, MAX_TEX_DIM, CPP_INT_MAX, PATH_SEP
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import overlay
 from src.core.util.video import video_from_images

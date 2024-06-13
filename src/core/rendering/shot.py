@@ -1,7 +1,6 @@
-import copy
 import json
 import pathlib
-from typing import Union, Final, Optional, Collection
+from typing import Union, Final, Optional
 
 import cv2
 from moderngl import Context, Texture
@@ -9,11 +8,11 @@ from numpy import deg2rad
 from numpy.typing import NDArray
 from pyrr import Vector3, Quaternion, Matrix44
 
+from src.core.geo.transform import Transform
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import TextureData
-from src.core.defs import PATH_SEP
-from src.core.geo.transform import Transform
 from src.core.util.basic import get_first_valid
+from src.core.util.defs import PATH_SEP
 
 
 class CtxShot:

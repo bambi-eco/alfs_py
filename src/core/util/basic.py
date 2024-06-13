@@ -7,9 +7,9 @@ import numpy as np
 from numpy.typing import NDArray
 from pyrr import Vector3
 
-from src.core.rendering.data import MeshData
 from src.core.geo.aabb import AABB
-from src.core.defs import Color
+from src.core.rendering.data import MeshData
+from src.core.util.defs import Color
 
 
 def delete_all(files: Union[str, Iterable[str]]) -> None:

@@ -1,13 +1,13 @@
-import numpy as np
 import os
+
+import numpy as np
 from pyrr import Quaternion, Vector3
 
-from src.core.defs import OUTPUT_DIR, INPUT_DIR
 from src.core.geo.transform import Transform
 from src.core.rendering.data import Resolution
-from src.examples.rendering.data import ShutterAnimationSettings, CameraPositioningMode, IntegralSettings, \
-    FocusAnimationSettings
-from src.examples.rendering.render import animate_shutter, project_shots, render_integral, animate_focus
+from src.core.util.defs import OUTPUT_DIR, INPUT_DIR
+from src.examples.rendering.data import CameraPositioningMode, IntegralSettings
+from src.examples.rendering.render import render_integral
 from src.examples.rendering.render_sp import render_integral_sp
 
 

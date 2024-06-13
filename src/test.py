@@ -1,16 +1,20 @@
+import os
+import random
 from typing import Final, cast
 
 import cv2
 import moderngl as mgl
 import numpy as np
-from pyrr import Matrix44, Vector3
+from pyrr import Matrix44, Vector3, Quaternion
+from trimesh import Trimesh
 
 from src.core.conv.coord_conversion import pixel_to_world_coord, world_to_pixel_coord
-from src.core.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
-    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import Resolution
+from src.core.util import TimeTracker
 from src.core.util.basic import get_center, nearest_int, make_quad
+from src.core.util.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
+    DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import split_components
 from src.core.util.moderngl import img_from_fbo
@@ -107,17 +111,58 @@ def test_deferred_shading() -> None:
 
 
 def test_coords_conv() -> None:
-    gltf_file = r'D:\BambiData\DEM\Hagenberg\dem_mesh_r2.glb'
-    mesh, _ = gltf_extract(gltf_file)
-    camera_position = Vector3([-166, 100, 518.9361845649696])
-    camera = Camera(fovy=60.0, aspect_ratio=1.0, position=camera_position)
-    image_res = np.array((20, 20))
+    with TimeTracker("Init Data", False):
+        bambi_dev_dir = os.getenv('BAMBI_DEV_DIR')
+        bambi_data_dir = os.getenv('BAMBI_DATA_DIR')
+        gltf_file = os.path.join(
+            bambi_dev_dir,
+            'Processed', 'BW', '2023_01_18_Ktn_Feldreh_Zollfelf', '1581F5FJB22A700A0DV7_M3TE', '010_Feldreh_Zoll',
+            'Data', 'dem', 'dem_mesh_r2.glb'
+        )
+        camera_position = Vector3([450.9566076750634, 5.060010188259184, 495.5558088407927])  # [0, 0, 500]
+        camera_rotation = Quaternion.from_eulers([0.0, 0.0, 57.841499999999826])  # [360.1, 0, 57.841499999999826]
+        camera = Camera(
+            position=camera_position, rotation=camera_rotation,
+            fovy=48.887902511473634, aspect_ratio=1.0,
+            orthogonal=False)
+        image_res = (1000, 1000)
 
-    input_coord = 5, 15
-    world_coord = pixel_to_world_coord(input_coord[0], input_coord[1], image_res[0], image_res[1], mesh, camera)
-    pixel_coord = world_to_pixel_coord(world_coord, image_res[0], image_res[1], camera)
+    with TimeTracker("Read Gltf", False):
+        mesh, _ = gltf_extract(gltf_file)
 
-    print(f'{input_coord} -> {world_coord} -> {pixel_coord}')
+    with TimeTracker("Proc mesh", False):
+        tri_mesh = Trimesh(vertices=mesh.vertices, faces=mesh.indices)
+
+    with TimeTracker("Cast rays", False):
+        errors = []
+        for _ in range(1):
+            x = random.random() * image_res[0]
+            if random.random() > 0.5:
+                x = int(x)
+
+            y = random.random() * image_res[1]
+            if random.random() > 0.5:
+                y = int(y)
+            input_coord = x, y
+
+            world_coord = pixel_to_world_coord(input_coord[0], input_coord[1], image_res[0], image_res[1], tri_mesh, camera)
+            pixel_coord = world_to_pixel_coord(world_coord, image_res[0], image_res[1], camera, ensure_int=False)
+
+            error = ((input_coord[0] - pixel_coord[0]) ** 2 + (input_coord[1] - pixel_coord[1]) ** 2) ** 0.5
+
+            print(f'({input_coord[0]:8.3f}, {input_coord[1]:8.3f}) -> '
+                  f'({world_coord[0]:8.3f}, {world_coord[1]:8.3f}, {world_coord[2]:8.3f}) -> '
+                  f'({pixel_coord[0]:8.3f}, {pixel_coord[1]:8.3f})'
+                  f' | error: {error}')
+
+            errors.append(error)
+
+    avg = sum(errors) / len(errors)
+    mxv = max(errors)
+    mnv = min(errors)
+
+    print('\n| metric |    avg    |    max    |    min    |\n|--------|-----------|-----------|-----------|')
+    print(f'|  error | {avg:7.3e} | {mxv:7.3e} | {mnv:7.3e} |')
 
 
 def main() -> None:
@@ -127,5 +172,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
-# TODO: Fix shot reloading for future dgx use

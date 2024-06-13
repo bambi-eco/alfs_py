@@ -2,7 +2,7 @@ from typing import Optional, Any
 
 from pyrr import Quaternion, Vector3, Matrix44
 
-from src.core.defs import UP, DOWN, LEFT, RIGHT, FORWARD, BACK
+from src.core.util.defs import UP, DOWN, LEFT, RIGHT, FORWARD, BACK
 
 
 class Transform:

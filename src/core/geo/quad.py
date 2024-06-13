@@ -2,9 +2,9 @@ from dataclasses import dataclass
 
 from pyrr import Vector3
 
-from src.core.defs import EPSILON
 from src.core.geo.tetrahedron import Tetrahedron
 from src.core.util.basic import vector_mean
+from src.core.util.defs import EPSILON
 
 
 @dataclass

@@ -3,17 +3,17 @@ from functools import cached_property
 from typing import Final, Optional, Iterable, Union, Iterator, Callable, cast
 
 import cv2
-import numpy as np
 import moderngl as mgl
+import numpy as np
 from moderngl import Context, Program, Framebuffer, Texture
 from numpy.typing import NDArray
 
-from src.core.defs import TRANSPARENT, BLACK, MAGENTA, PATH_SEP
 from src.core.geo.aabb import AABB
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import MeshData, TextureData, RenderObject, Resolution, RenderResultMode
 from src.core.rendering.shot import CtxShot
 from src.core.util.basic import gen_checkerboard_tex, get_aabb
+from src.core.util.defs import TRANSPARENT, BLACK, MAGENTA, PATH_SEP
 from src.core.util.image import overlay
 from src.core.util.moderngl import img_from_fbo
 

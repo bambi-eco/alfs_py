@@ -7,8 +7,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pyrr import Vector3
 
-from src.core.defs import Color
 from src.core.util.basic import compare_color
+from src.core.util.defs import Color
 
 
 def base64_to_img(base64_data: Union[bytes, str]) -> NDArray[np.number]:

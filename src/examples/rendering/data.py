@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Callable
 
-from src.core.defs import ROOT_DIR
 from src.core.geo.transform import Transform
 from src.core.rendering.data import Resolution
+from src.core.util.defs import ROOT_DIR
 
 
 class CameraPositioningMode(Enum):
