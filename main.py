@@ -10,7 +10,7 @@ def main() -> None:
 
     end_t = time.time()
     dur = end_t - start_t
-    print(f'[Start: {time.ctime(start_t)} | End: {time.ctime(end_t)} | Runtime: {dur*1000:.3f}ms]')
+    print(f'[Start: {time.ctime(start_t)} | End: {time.ctime(end_t)} | Runtime: {dur * 1000:.3f}ms]')
 
 
 if __name__ == '__main__':

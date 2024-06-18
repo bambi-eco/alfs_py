@@ -23,13 +23,13 @@ class StrEnum(str, Enum):
 
 
 # DIRECTORIES
-ROOT_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.parent.absolute())}{PATH_SEP}'
-MODULE_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.absolute())}{PATH_SEP}'
+ROOT_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.parent.parent.absolute())}{PATH_SEP}'
+MODULE_DIR: Final[str] = f'{str(pathlib.Path(__file__).parent.parent.parent.absolute())}{PATH_SEP}'
 INPUT_DIR: Final[str] = f'{ROOT_DIR}input{PATH_SEP}'
 OUTPUT_DIR: Final[str] = f'{ROOT_DIR}output{PATH_SEP}'
 
 # SHADERS
-SHADERS_PATH: Final[str] = f'{MODULE_DIR}{PATH_SEP}shaders{PATH_SEP}'
+SHADERS_PATH: Final[str] = f'{MODULE_DIR}shaders{PATH_SEP}'
 COL_VERT_SHADER_PATH: Final[str] = f'{SHADERS_PATH}col.vert.glsl'
 COL_FRAG_SHADER_PATH: Final[str] = f'{SHADERS_PATH}col.frag.glsl'
 FLAT_VERT_SHADER_PATH: Final[str] = f'{SHADERS_PATH}flat.vert.glsl'
@@ -54,3 +54,10 @@ RIGHT: Final[Vector3] = Vector3([1, 0, 0], dtype=float)
 DOWN: Final[Vector3] = Vector3([0, -1, 0], dtype=float)
 BACK: Final[Vector3] = Vector3([0, 0, 1], dtype=float)
 LEFT: Final[Vector3] = Vector3([-1, 0, 0], dtype=float)
+
+
+if __name__ == '__main__':
+    globs = globals().copy()
+    for name, value in globs.items():
+        if not name.startswith('__') and name.isupper():
+            print(f'{name}: {value}')

@@ -1,5 +1,8 @@
+import json
 import os
 import random
+import time
+from collections import defaultdict
 from typing import Final, cast
 
 import cv2
@@ -9,16 +12,20 @@ from pyrr import Matrix44, Vector3, Quaternion
 from trimesh import Trimesh
 
 from src.core.conv.coord_conversion import pixel_to_world_coord, world_to_pixel_coord
+from src.core.geo.transform import Transform
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import Resolution
 from src.core.util import TimeTracker
 from src.core.util.basic import get_center, nearest_int, make_quad
+from src.core.util.cyclic_list import CyclicList
 from src.core.util.defs import OUTPUT_DIR, INPUT_DIR, DEF_FRAG_SHADER_PATH, \
     DEF_VERT_SHADER_PATH, DEF_PASS_VERT_SHADER_PATH, DEF_PASS_FRAG_SHADER_PATH
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import split_components
 from src.core.util.moderngl import img_from_fbo
-from src.core.util.pyrr import rand_quaternion
+from src.core.util.pyrrs import rand_quaternion
+from src.examples.rendering.data import IntegralSettings, CameraPositioningMode
+from src.examples.rendering.render import render_integral, DoneCallback
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = Resolution(1024 * 2, 1024 * 2).as_tuple()
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -114,7 +121,6 @@ def test_deferred_shading() -> None:
 def test_coords_conv() -> None:
     with TimeTracker("Init Data", False):
         bambi_dev_dir = os.getenv('BAMBI_DEV_DIR')
-        bambi_data_dir = os.getenv('BAMBI_DATA_DIR')
         gltf_file = os.path.join(
             bambi_dev_dir,
             'Processed', 'BW', '2023_01_18_Ktn_Feldreh_Zollfelf', '1581F5FJB22A700A0DV7_M3TE', '010_Feldreh_Zoll',
@@ -170,10 +176,132 @@ def test_coords_conv() -> None:
     print(f'|  error | {avg:7.3e} | {mxv:7.3e} | {mnv:7.3e} |')
 
 
+def test_render_labels() -> None:
+
+    # region paths
+    bambi_dev_dir = os.getenv('BAMBI_DEV_DIR')
+    data_dir = os.path.join(bambi_dev_dir, 'Processed', 'BW', '2023_01_18_Ktn_Feldreh_Zollfelf',
+                            '1581F5FJB22A700A0DV7_M3TE', '010_Feldreh_Zoll')
+
+    dem_file = os.path.join(data_dir, 'Data', 'dem', 'dem_mesh_r2.glb')
+    labels_file = os.path.join(data_dir, 'labels.json')
+    info_file = os.path.join(data_dir, 'info.json')
+    frames_dir = os.path.join(data_dir, 'Frames_T')
+
+    poses_file = os.path.join(frames_dir, 'matched_poses.json')
+    mask_file = os.path.join(frames_dir, 'mask_T.png')
+
+    output_file = os.path.join(OUTPUT_DIR, 'labeled_integral.png')
+
+    # endregion
+
+    # region config
+
+    input_resolution = Resolution(1024, 1024)
+    render_resolution = Resolution(720 * 10, 720 * 10)
+    first_frame_idx = 25000  # 31500
+    last_frame_idx = 35000  # 32700
+    frame_count = last_frame_idx - first_frame_idx
+    frame_range = range(first_frame_idx, last_frame_idx)
+
+    label_colors = CyclicList((  # BGR
+        (102, 0, 255),  # '#ff0066',  #
+        (255, 102, 0),  # '#0066ff',  #
+        (0, 255, 102),  # '#66ff00',  #
+        (255, 0, 102),  # '#6600ff',  #
+        (255, 102, 0),  # '#00ff66',  #
+        (0, 102, 255),  # '#ff6600',  #
+    ))
+
+    # endregion
+
+    # region render integral
+
+    with open(info_file, 'r') as jf:
+        data = json.load(jf)
+    correction = data.get('correction', None)
+
+    if correction is not None:
+        translation = correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
+        translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
+
+        rotation = correction.get('rotation', {'x': 0, 'y': 0, 'z': 0})
+        rotation = Quaternion.from_eulers([rotation['x'], rotation['y'], rotation['z']], dtype='f4')
+
+        correction = Transform(translation, rotation)
+
+    settings = IntegralSettings(
+        count=frame_count, initial_skip=first_frame_idx, add_background=True, camera_dist=10.0,
+        camera_position_mode=CameraPositioningMode.shot_centered,  fovy=50.0, orthogonal=True,
+        ortho_size=(512, 512), correction=correction, resolution=render_resolution,
+        show_integral=False, output_file=output_file
+    )
+
+    render_camera = render_integral(dem_file, poses_file, mask_file, settings)
+
+    # endregion
+
+    # region draw lables
+
+    label_done = DoneCallback('      ')
+    print('Start label projection process')
+    print('  Projecting pixels')
+
+    mesh, _ = gltf_extract(dem_file)
+    tri_mesh = Trimesh(vertices=mesh.vertices, faces=mesh.indices)
+
+    render = cv2.imread(output_file)
+    frame_data = defaultdict(lambda: dict())
+
+    with open(poses_file, 'r') as jf:
+        poses_data = json.load(jf)
+    image_data = poses_data['images']
+
+    for frame in frame_range:
+        image = image_data[frame]
+        frame_dict = frame_data[frame]
+        position = Vector3(image['location'])
+        rotation = Quaternion.from_eulers([np.deg2rad(val % 360.0) for val in image['rotation']])
+        fovy = image['fovy'][0]
+
+        frame_dict['camera'] = Camera(fovy=fovy, aspect_ratio=1.0, position=position, rotation=rotation)
+        frame_dict['labels'] = []
+
+    with open(labels_file, 'r') as jf:
+        label_data = json.load(jf)
+    for i, label in enumerate(label_data):
+        color = label_colors[i]
+        for state in label['states']:
+            frame_idx = state['frameIdx']
+            if frame_idx in frame_range:
+                frame_data[frame_idx]['labels'].append((state['pxlCoordinates'][:4], color))
+
+    for frame, data in frame_data.items():
+        camera = data['camera']
+        for i, (poly_coords, color) in enumerate(data['labels']):
+            render_pixels = []
+            for pixel in poly_coords:
+                x = pixel['x']
+                y = pixel['y']
+                w_pos = pixel_to_world_coord(x, y, input_resolution.width, input_resolution.height, tri_mesh, camera)
+                np_pos = world_to_pixel_coord(w_pos, render_resolution.width, render_resolution.height, render_camera)
+                render_pixels.append(np_pos)
+            poly_lines = [np.array(render_pixels).reshape((-1, 1, 2))]
+            cv2.polylines(render, poly_lines, True, color, thickness=1)
+    label_done()
+
+    print('  Saving labeled integral')
+    cv2.imwrite(output_file, render)
+    label_done()
+    label_done.total(msg='All done', indent=False)
+
+
 def main() -> None:
     print(f'running {__file__}')
-    test_coords_conv()
+    test_render_labels()
 
 
 if __name__ == '__main__':
     main()
+
+# further tests with flights showing boars

@@ -135,7 +135,7 @@ def make_shot_loader(shots: Iterable[CtxShot]) -> Iterable[CtxShot]:
     Creates a shot loader. Ensures all examples use the same parameters when using a shot loader.
     :return: A shot loader instance ensuring the ``Iterable[CtxShot]`` type.
     """
-    return AsyncShotLoader(shots, 32, 8)
+    return AsyncShotLoader(shots, 96, 12)
 
 
 def read_gltf(gltf_file: str) -> tuple[Optional[MeshData], Optional[TextureData]]:
@@ -402,7 +402,7 @@ def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
 
 def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
-                    settings: Optional[IntegralSettings] = None) -> None:
+                    settings: Optional[IntegralSettings] = None) -> Camera:
     done = make_done_callback()
     print('Start projection process')
 
@@ -414,7 +414,7 @@ def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
     # endregion
 
-    ctx, _, renderer, shots, mask = _base_steps(done, gltf_file, shot_json_file, mask_file, se)
+    ctx, camera, renderer, shots, mask = _base_steps(done, gltf_file, shot_json_file, mask_file, se)
 
     # region Rendering Integral
 
@@ -432,6 +432,7 @@ def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str
     done()
 
     done.total(msg='All done', indent=False)
+    return camera
 
 
 def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
