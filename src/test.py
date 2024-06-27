@@ -1,14 +1,12 @@
 import json
 import os
 import random
-import time
 from collections import defaultdict
 from typing import Final, cast
 
 import cv2
 import moderngl as mgl
 import numpy as np
-import pyrr
 from pyrr import Matrix44, Vector3, Quaternion
 from trimesh import Trimesh
 
@@ -315,14 +313,15 @@ def test_render_labels() -> None:
         camera = data['camera']
 
         for color_idx, poly_coords in data['label_coords']:
-            render_pixels = []
+            pixel_xs = []
+            pixel_ys = []
             for pixel in poly_coords:
-                x = pixel['x']
-                y = pixel['y']
-                w_pos = pixel_to_world_coord(x, y, input_resolution.width, input_resolution.height, tri_mesh, camera)
-                np_pos = world_to_pixel_coord(w_pos, render_resolution.width, render_resolution.height, render_camera)
-                render_pixels.append(np_pos)
-            poly_lines = [np.array(render_pixels).reshape((-1, 1, 2))]
+                pixel_xs.append(pixel['x'])
+                pixel_ys.append(pixel['y'])
+
+            w_poses = pixel_to_world_coord(pixel_xs, pixel_ys, input_resolution.width, input_resolution.height, tri_mesh, camera)
+            np_poses = world_to_pixel_coord(w_poses, render_resolution.width, render_resolution.height, render_camera)
+            poly_lines = [np.array(np_poses).T.reshape((-1, 1, 2))]
             cv2.polylines(render, poly_lines, True, label_colors[color_idx], thickness=1)
     label_done()
 

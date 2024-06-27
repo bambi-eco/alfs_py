@@ -1,12 +1,12 @@
 from collections import defaultdict
 from functools import cache
-from typing import Optional, Union
+from typing import Optional, Union, Sequence
 
 import cv2
 import numpy as np
 import trimesh
-from numpy.typing import NDArray
-from pyrr import Vector3, Vector4, Matrix44
+from numpy.typing import NDArray, ArrayLike
+from pyrr import Vector3, Vector4
 from trimesh import Trimesh
 
 from src.core.conv.data import PixelOrigin, Distortion
@@ -36,8 +36,8 @@ def _po_t_lookup() -> dict[PixelOrigin, tuple[float, float, bool, bool]]:
     return res
 
 
-def cvt_pixel_origin(x: float, y: float, img_width, img_height, from_origin: PixelOrigin,
-                     to_origin: PixelOrigin) -> tuple[float, float]:
+def cvt_pixel_origin(x: ArrayLike, y: ArrayLike, img_width, img_height, from_origin: PixelOrigin,
+                     to_origin: PixelOrigin) -> tuple[ArrayLike, ArrayLike]:
     """
     Converts the given pixel coordinates from one common image origin to another.
     :param x: The x-coordinate of the pixel
@@ -68,7 +68,8 @@ def cvt_pixel_origin(x: float, y: float, img_width, img_height, from_origin: Pix
     return n_x, n_y
 
 
-def undistort_coords(x: float, y: float, distortion: Distortion, camera_matrix: Optional[NDArray]) -> tuple[float, float]:
+def undistort_coords(x: ArrayLike, y: ArrayLike, distortion: Distortion,
+                     camera_matrix: Optional[NDArray]) -> tuple[ArrayLike, ArrayLike]:
     """
     Removes a distortion from 2D coordinates
     :param x: The x-coordinate
@@ -80,14 +81,16 @@ def undistort_coords(x: float, y: float, distortion: Distortion, camera_matrix: 
     if camera_matrix is None:
         camera_matrix = np.identity(3)
 
-    dist_coords = np.array([x, y, 1])
-    undist_coords = cv2.undistortPoints(dist_coords, camera_matrix, distortion.to_array())
-    x = undist_coords[0, 0, 0]
-    y = undist_coords[0, 0, 1]
-    return x, y
+    dst_coords = np.column_stack((x, y)).reshape(-1, 1, 2).astype(np.float32)
+    dst = distortion.to_array(dtype=np.float32)
+    undst_coords = cv2.undistortPoints(dst_coords, camera_matrix, dst)
+
+    undst_x = np.squeeze(undst_coords[..., 0])
+    undst_y = np.squeeze(undst_coords[..., 1])
+    return undst_x, undst_y
 
 
-def get_cos_angle(ref_angle: float, offset: float, ref_offset: float) -> float:
+def get_cos_angle(ref_angle: float, offset: ArrayLike, ref_offset: float) -> float:
     """
     This function calculates the angle of a right-angled triangle, which is nested within a reference right-angled
     triangle whose angle is known. Both triangles share the same adjacent side, but have opposite sides of different
@@ -121,29 +124,45 @@ def get_cos_angle(ref_angle: float, offset: float, ref_offset: float) -> float:
     return np.arctan((offset * np.tan(ref_angle)) / ref_offset)
 
 
-def cast_ray(ray_origin: Vector3, ray_direction: Vector3, mesh: Union[MeshData, Trimesh]) -> Optional[Vector3]:
+def cast_ray(ray_origins: Union[Vector3, Sequence[Vector3]], ray_directions: Union[Vector3, Sequence[Vector3]],
+             mesh: Union[MeshData, Trimesh], include_misses: bool = True) -> Sequence[Optional[ArrayLike]]:
     """
     Casts a ray to find an intersection with the given mesh.
-    :param ray_origin: The origin coordinate of the ray
-    :param ray_direction: The rays' direction
+    :param ray_origins: The origin coordinate of the rays
+    :param ray_directions: The ray directions
     :param mesh: The mesh to be used for hits
+    :param include_misses: Whether non-intersecting rays should be included in the result via ``None`` values (default
+    value is ``True``). If set to ``True``, the result indices correspond to the indices of a rays  origin or direction.
     :return: If there were no hits ``None``; otherwise the coordinate of the first hit
     """
     if not isinstance(mesh, Trimesh):
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.indices)
 
-    origins = np.array([ray_origin[:3]])
-    directions = np.array([ray_direction[:3]])
-    point, *_ = mesh.ray.intersects_location(origins, directions, multiple_hits=False)
+    origins = np.array(ray_origins).reshape((-1, 3))
+    directions = np.array(ray_directions).reshape((-1, 3))
 
-    return Vector3(point[0]) if len(point) > 0 else None
+    hits, ray_indices, *_ = mesh.ray.intersects_location(origins, directions, multiple_hits=False)
+
+    if include_misses:
+        if len(ray_origins.shape) > 1:
+            res_count = ray_origins.shape[0]
+        else:
+            res_count = 1
+
+        res_dict = {ray_indices[i]: hits[i] for i in range(len(hits))}
+        res = [res_dict.get(i, None) for i in range(res_count)]
+    else:
+        res = hits
+
+    return res
 
 
-def world_to_pixel_coord(coord: Vector3, width: int, height: int, camera: Camera, ensure_int: bool = True,
-                         viewport_origin: PixelOrigin = PixelOrigin.TopLeft) -> Union[tuple[int, int], tuple[float, float]]:
+def world_to_pixel_coord(coords: Union[ArrayLike, Sequence[ArrayLike]],
+                         width: int, height: int, camera: Camera, ensure_int: bool = True,
+                         viewport_origin: PixelOrigin = PixelOrigin.TopLeft) -> tuple[ArrayLike, ArrayLike]:
     """
     Converts world coordinates into pixel coordinates of a shot projection.
-    :param coord: The coordinate to convert
+    :param coords: The coordinates to convert
     :param width: The width of the image containing the pixel coordinate
     :param height: The height of the image containing the pixel coordinate
     :param camera: The camera to be used for projecting the coordinate
@@ -151,35 +170,42 @@ def world_to_pixel_coord(coord: Vector3, width: int, height: int, camera: Camera
     :param viewport_origin: The origin of the viewport (defaults to top left)
     :return: The pixel coordinates of the projected world point
     """
-    # transform coordinate to camera space
-    camera_coord = camera.get_view() * coord
-    camera_coord = Vector4.from_vector3(camera_coord, w=1.0)
+    coords = np.reshape(coords, (-1, 3))
+    x = coords[:, 0]
+    y = coords[:, 1]
+    z = coords[:, 2]
 
-    # project coordinate onto the normalized camera plane
-    ndc_coord = camera.get_proj() * camera_coord
-    ndc_coord /= ndc_coord[3]
+    homo_coords = np.stack((x, y, z, np.ones_like(x)), axis=-1)
+    camera_coords = np.dot(homo_coords, camera.get_view())
+    ndc_coords = np.dot(camera_coords, camera.get_proj())
+    ndc_coords_norm = ndc_coords / ndc_coords[:, 3]
 
     # convert normalized coordinates to top-left oriented pixel coordinates
-    pixel_coord = (ndc_coord.x + 1.0) * width / 2.0, height - (ndc_coord.y + 1) / 2 * height
+    pixel_xs = (ndc_coords_norm[:, 0] + 1.0) * width / 2.0
+    pixel_ys = height - (ndc_coords_norm[:, 1] + 1) / 2.0 * height
 
     if viewport_origin != PixelOrigin.TopLeft:
-        pixel_coord = cvt_pixel_origin(pixel_coord[0], pixel_coord[1], width, height,
-                                       PixelOrigin.TopLeft, viewport_origin)
+        pixel_xs, pixel_ys = cvt_pixel_origin(pixel_xs, pixel_ys, width, height, PixelOrigin.TopLeft, viewport_origin)
 
     if ensure_int:
-        pixel_coord = (nearest_int(pixel_coord[0]), nearest_int(pixel_coord[1]))
+        pixel_xs = np.floor(pixel_xs + 0.5).astype(int)
+        pixel_ys = np.floor(pixel_ys + 0.5).astype(int)
 
-    return pixel_coord
+    if len(coords.shape) <= 1:
+        pixel_xs = pixel_xs[0]
+        pixel_ys = pixel_ys[0]
+
+    return pixel_xs, pixel_ys
 
 
-def pixel_to_world_coord(x: float, y: float, width: int, height: int, mesh: Union[MeshData, Trimesh],
+def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, mesh: Union[MeshData, Trimesh],
                          camera: Camera, distortion: Optional[Distortion] = None,
-                         camera_matrix: Optional[NDArray] = None) -> Optional[Vector3]:
+                         camera_matrix: Optional[NDArray] = None) -> Sequence[Optional[ArrayLike]]:
     """
     Converts pixel coordinates of a shot projection back to 3D coordinates. The pixel origin is assumed to be in the
     top left corner of the image, with the positive x-axis pointing to the right and the y-axis pointing down.
-    :param x: The x-coordinate of the pixel to convert
-    :param y: The y-coordinate of the pixel to convert
+    :param x: The x-coordinates of the pixels to convert
+    :param y: The y-coordinates of the pixels to convert
     :param width: The total width of the image
     :param height: The total height of the image
     :param mesh: The mesh associated with the pixel. Its surface represents the set of possible valid 3D coordinates.
@@ -193,6 +219,13 @@ def pixel_to_world_coord(x: float, y: float, width: int, height: int, mesh: Unio
     coordinates associated with the given pixel
     :TODO: Allow x and y to be numpy arrays to convert entire arrays of coordinates.
     """
+    x = np.array(x)
+    y = np.array(y)
+
+    count = len(x)
+    if count == 0:
+        return
+
     if distortion is not None:
         x, y = undistort_coords(x, y, distortion, camera_matrix)
 
@@ -201,27 +234,29 @@ def pixel_to_world_coord(x: float, y: float, width: int, height: int, mesh: Unio
     ndc_y = 1.0 - (2.0 * y / height)
 
     if camera.orthogonal:
+        # TODO: fix and test
         # the ray direction is parallel to the camera forward vector
-        ray_dir = camera.transform.forward
+        ray_dirs = np.array([camera.transform.forward] * count)
 
         # the ray origin lies on the same plane as the camera but is offset by the pixels distance on the image plane
         img_plane_width, img_plane_height = camera.orthogonal_size
         origin_offset_x = (ndc_x * img_plane_width) / width
         origin_offset_y = (ndc_y * img_plane_height) / height
-        origin_offset = Vector3([origin_offset_x, origin_offset_y, 0])
-        ray_origin = camera.transform.position + camera.transform.rotation * origin_offset
+        origin_offset = np.array([origin_offset_x, origin_offset_y, np.zeros_like(x)])
+        ray_origins = camera.transform.position + camera.transform.rotation @ origin_offset
     else:  # camera has a perspective projection
         # the ray direction is the projection of the pixel coordinates onto the image plane
         tan_fov_y = np.tan(np.deg2rad(camera.fovy) / 2.0)
-        ray_dir = Vector3([
+        n_ray_dirs = np.stack((
             ndc_x * camera.aspect_ratio * tan_fov_y,  # account for fovx via aspect ratio (more efficient)
             ndc_y * tan_fov_y,
-            -1.0  # the camera looks along the negative z-axis
-        ])
-        ray_dir = camera.transform.rotation * ray_dir
+            np.full_like(x, -1.0)  # the camera looks along the negative z-axis
+        ), axis=-1)
+
+        ray_dirs = np.dot(n_ray_dirs, camera.transform.rotation.matrix33.T)
 
         # the ray origin is the same as the camera origin
-        ray_origin = camera.transform.position
+        ray_origins = np.array([camera.transform.position] * count)
 
-    res = cast_ray(ray_origin, ray_dir, mesh)
+    res = cast_ray(ray_origins, ray_dirs, mesh)
     return res
