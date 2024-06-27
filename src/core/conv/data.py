@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import NDArray, DTypeLike
 
 
 class PixelOrigin(Enum):
@@ -28,6 +28,7 @@ class PixelOrigin(Enum):
     BottomCenter = 0b1001
     BottomRight =  0b1010
 
+
 @dataclass
 class Distortion:
     k1: float
@@ -36,5 +37,5 @@ class Distortion:
     p2: float
     k3: float
 
-    def to_array(self) -> NDArray:
-        return np.array([self.k1, self.k2, self.p1, self.p2, self.k3])
+    def to_array(self, dtype: DTypeLike = np.float32) -> NDArray:
+        return np.array([self.k1, self.k2, self.p1, self.p2, self.k3], dtype=dtype)
