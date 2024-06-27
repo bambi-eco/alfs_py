@@ -1,4 +1,4 @@
-from typing import Optional, Final
+from typing import Optional, Final, Any
 
 from numpy import deg2rad
 from pyrr import Vector3, Quaternion, Matrix44, Vector4
@@ -199,3 +199,43 @@ class Frustum:
         pp = mat * p4
         # GLSL clipping rule
         return abs(pp.x) <= pp.w and abs(pp.y) <= pp.w and abs(pp.z) <= pp.w
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        :return: A dictionary that can be used to reconstruct this frustum instance.
+        """
+        return {
+            'fovy': self._perspective_fovy,
+            'aspect_ratio': self.aspect_ratio,
+            'orthogonal': self.orthogonal,
+            'orthogonal_size': self.orthogonal_size,
+            'near': self.near,
+            'far': self.far,
+            'transform': self.transform.to_dict()
+        }
+
+    @staticmethod
+    def from_dict(dictionary: dict[str, Any]) -> 'Frustum':
+        """
+        Creates a frustum instance from a dictionary of parameters.
+        :return: If the dictionary is missing properties or cannot be used for constructing a frustum ``None``;
+        otherwise the constructed frustum instance.
+        """
+        try:
+            input_dict = {
+                k: v for k, v in dictionary.items() if k in {
+                    'fovy',
+                    'aspect_ratio',
+                    'orthogonal',
+                    'orthogonal_size',
+                    'near',
+                    'far',
+                    'transform'
+                }
+            }
+            if 'transform' in input_dict:
+                input_dict["transform"] = Transform.from_dict(input_dict['transform'])
+
+            return Frustum(**input_dict)
+        except (TypeError, IndexError, KeyError):
+            pass

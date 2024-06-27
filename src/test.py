@@ -8,6 +8,7 @@ from typing import Final, cast
 import cv2
 import moderngl as mgl
 import numpy as np
+import pyrr
 from pyrr import Matrix44, Vector3, Quaternion
 from trimesh import Trimesh
 
@@ -178,10 +179,15 @@ def test_coords_conv() -> None:
 
 def test_render_labels() -> None:
 
+    data_sets = [
+        ('BW', '2023_01_18_Ktn_Feldreh_Zollfelf', '1581F5FJB22A700A0DV7_M3TE', '010_Feldreh_Zoll'),
+        ('Spektakulair', '2023_10_05_NOe_Purkersdorf', '1581F5FJB22A700A0DW3_M3TE', '104_Schwarzwild'),
+    ]  # ID 31
+
     # region paths
+
     bambi_dev_dir = os.getenv('BAMBI_DEV_DIR')
-    data_dir = os.path.join(bambi_dev_dir, 'Processed', 'BW', '2023_01_18_Ktn_Feldreh_Zollfelf',
-                            '1581F5FJB22A700A0DV7_M3TE', '010_Feldreh_Zoll')
+    data_dir = os.path.join(bambi_dev_dir, 'Processed', *data_sets[1])
 
     dem_file = os.path.join(data_dir, 'Data', 'dem', 'dem_mesh_r2.glb')
     labels_file = os.path.join(data_dir, 'labels.json')
@@ -191,7 +197,9 @@ def test_render_labels() -> None:
     poses_file = os.path.join(frames_dir, 'matched_poses.json')
     mask_file = os.path.join(frames_dir, 'mask_T.png')
 
-    output_file = os.path.join(OUTPUT_DIR, 'labeled_integral.png')
+    output_file = os.path.join(OUTPUT_DIR, 'integral.png')
+    labeled_output_file = os.path.join(OUTPUT_DIR, 'labeled_integral.png')
+    render_camera_file = os.path.join(OUTPUT_DIR, 'render_camera.json')
 
     # endregion
 
@@ -199,10 +207,12 @@ def test_render_labels() -> None:
 
     input_resolution = Resolution(1024, 1024)
     render_resolution = Resolution(720 * 10, 720 * 10)
-    first_frame_idx = 25000  # 31500
-    last_frame_idx = 35000  # 32700
+    first_frame_idx = 100  # 4838  # 31500
+    last_frame_idx = 10900  # 5238  # 32700
     frame_count = last_frame_idx - first_frame_idx
     frame_range = range(first_frame_idx, last_frame_idx)
+
+    render = False
 
     label_colors = CyclicList((  # BGR
         (102, 0, 255),  # '#ff0066',  #
@@ -213,35 +223,49 @@ def test_render_labels() -> None:
         (0, 102, 255),  # '#ff6600',  #
     ))
 
-    # endregion
-
-    # region render integral
-
     with open(info_file, 'r') as jf:
         data = json.load(jf)
     correction = data.get('correction', None)
 
     if correction is not None:
         translation = correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
-        translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
+        cor_translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
 
         rotation = correction.get('rotation', {'x': 0, 'y': 0, 'z': 0})
-        rotation = Quaternion.from_eulers([rotation['x'], rotation['y'], rotation['z']], dtype='f4')
-
-        correction = Transform(translation, rotation)
-
-    settings = IntegralSettings(
-        count=frame_count, initial_skip=first_frame_idx, add_background=True, camera_dist=10.0,
-        camera_position_mode=CameraPositioningMode.shot_centered,  fovy=50.0, orthogonal=True,
-        ortho_size=(512, 512), correction=correction, resolution=render_resolution,
-        show_integral=False, output_file=output_file
-    )
-
-    render_camera = render_integral(dem_file, poses_file, mask_file, settings)
+        cor_rotation_eulers = Vector3([rotation['x'], rotation['y'], rotation['z']], dtype='f4')
+        correction = Transform(cor_translation, Quaternion.from_eulers(cor_rotation_eulers))
+    else:
+        cor_translation = Vector3()
+        cor_rotation_eulers = Vector3()
+        correction = Transform()
 
     # endregion
 
-    # region draw lables
+    # region render integral
+
+    if render:
+        settings = IntegralSettings(
+            count=frame_count, initial_skip=first_frame_idx, add_background=True, camera_dist=10.0,
+            camera_position_mode=CameraPositioningMode.shot_centered,  fovy=50.0, aspect_ratio=1.0, orthogonal=True,
+            ortho_size=(256, 256), correction=correction, resolution=render_resolution,
+            show_integral=False, output_file=output_file
+        )
+
+        render_camera = render_integral(dem_file, poses_file, mask_file, settings)
+
+        render_camera_dict = render_camera.to_dict()
+        with open(render_camera_file, 'w+') as jf:
+            json.dump(render_camera_dict, jf)
+
+    # endregion
+
+    # region draw labels
+
+    with open(render_camera_file, 'r') as jf:
+        render_camera_dict = json.load(jf)
+    render_camera = Camera.from_dict(render_camera_dict)
+    if render_camera is None:
+        raise Exception('A' * 5000)
 
     label_done = DoneCallback('      ')
     print('Start label projection process')
@@ -251,34 +275,46 @@ def test_render_labels() -> None:
     tri_mesh = Trimesh(vertices=mesh.vertices, faces=mesh.indices)
 
     render = cv2.imread(output_file)
-    frame_data = defaultdict(lambda: dict())
+    frame_data = defaultdict(lambda: {
+        "label_coords": [],
+        "camera": None
+    })
+
+    with open(labels_file, 'r') as jf:
+        label_data = json.load(jf)
+
+    label_state_data = defaultdict(lambda: [])
+    for i, label in enumerate(label_data):
+        label_state_data[i].extend(label["states"])
+
+    for label in label_state_data:
+        for state in label_state_data[label]:
+            label_coords = state["pxlCoordinates"][:4]
+            color_idx = label
+            frame_data[state["frameIdx"]]["label_coords"].append((color_idx, label_coords))
 
     with open(poses_file, 'r') as jf:
         poses_data = json.load(jf)
     image_data = poses_data['images']
 
-    for frame in frame_range:
-        image = image_data[frame]
-        frame_dict = frame_data[frame]
-        position = Vector3(image['location'])
-        rotation = Quaternion.from_eulers([np.deg2rad(val % 360.0) for val in image['rotation']])
-        fovy = image['fovy'][0]
+    for frame_idx in frame_data:
+        cur_frame_data = image_data[frame_idx]
+        fovy = cur_frame_data['fovy'][0]
 
-        frame_dict['camera'] = Camera(fovy=fovy, aspect_ratio=1.0, position=position, rotation=rotation)
-        frame_dict['labels'] = []
+        position = Vector3(cur_frame_data['location'])
+        rotation_eulers = Vector3([np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) + cor_rotation_eulers
 
-    with open(labels_file, 'r') as jf:
-        label_data = json.load(jf)
-    for i, label in enumerate(label_data):
-        color = label_colors[i]
-        for state in label['states']:
-            frame_idx = state['frameIdx']
-            if frame_idx in frame_range:
-                frame_data[frame_idx]['labels'].append((state['pxlCoordinates'][:4], color))
+        position += cor_translation
+        rotation = Quaternion.from_eulers(rotation_eulers)
+
+        camera = Camera(fovy=fovy, aspect_ratio=1.0, position=position, rotation=rotation)
+
+        frame_data[frame_idx]["camera"] = camera
 
     for frame, data in frame_data.items():
         camera = data['camera']
-        for i, (poly_coords, color) in enumerate(data['labels']):
+
+        for color_idx, poly_coords in data['label_coords']:
             render_pixels = []
             for pixel in poly_coords:
                 x = pixel['x']
@@ -287,13 +323,15 @@ def test_render_labels() -> None:
                 np_pos = world_to_pixel_coord(w_pos, render_resolution.width, render_resolution.height, render_camera)
                 render_pixels.append(np_pos)
             poly_lines = [np.array(render_pixels).reshape((-1, 1, 2))]
-            cv2.polylines(render, poly_lines, True, color, thickness=1)
+            cv2.polylines(render, poly_lines, True, label_colors[color_idx], thickness=1)
     label_done()
 
     print('  Saving labeled integral')
-    cv2.imwrite(output_file, render)
+    cv2.imwrite(labeled_output_file, render)
     label_done()
     label_done.total(msg='All done', indent=False)
+
+    # endregion
 
 
 def main() -> None:

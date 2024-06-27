@@ -240,3 +240,34 @@ class Transform:
         :param distance: The distance to translate
         """
         self.move_forward(-distance)
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        :return: A dictionary that can be used to reconstruct this transform instance.
+        """
+        return {
+            'position': self.position.tolist(),
+            'rotation': self.rotation.tolist(),
+            'scale': self.scale.tolist(),
+            'dtype': self.dtype,
+        }
+
+    @staticmethod
+    def from_dict(dictionary: dict[str, Any]) -> 'Transform':
+        """
+        Creates a transform instance from a dictionary of parameters.
+        :return: If the dictionary is missing properties or cannot be used for constructing a transform ``None``;
+        otherwise the constructed transform instance.
+        """
+        try:
+            input_dict = {
+                k: v for k, v in dictionary.items() if k in {
+                    'position',
+                    'rotation',
+                    'scale',
+                    'dtype'
+                }
+            }
+            return Transform(**input_dict)
+        except TypeError:
+            pass

@@ -152,7 +152,7 @@ def world_to_pixel_coord(coord: Vector3, width: int, height: int, camera: Camera
     :return: The pixel coordinates of the projected world point
     """
     # transform coordinate to camera space
-    camera_coord = camera.transform.rotation.inverse * (coord - camera.transform.position)
+    camera_coord = camera.get_view() * coord
     camera_coord = Vector4.from_vector3(camera_coord, w=1.0)
 
     # project coordinate onto the normalized camera plane
@@ -183,12 +183,15 @@ def pixel_to_world_coord(x: float, y: float, width: int, height: int, mesh: Unio
     :param width: The total width of the image
     :param height: The total height of the image
     :param mesh: The mesh associated with the pixel. Its surface represents the set of possible valid 3D coordinates.
+    Passing and reusing the same ``Trimesh`` instance can lead to a significant performance boost compared to passing
+    the raw mesh data or a new instance for every conversion.
     :param camera: A camera configured to be equal to the camera used during rendering
     :param distortion: The distortion to be removed from the given pixel coordinates (optional)
     :param camera_matrix: The camera matrix to be used for removing distortion (optional). If not specified when a
     distortion is given, a neutral matrix will be used instead
     :return: If the given pixel coordinates were invalid or did not result in a hit ``None```; otherwise the 3D
     coordinates associated with the given pixel
+    :TODO: Allow x and y to be numpy arrays to convert entire arrays of coordinates.
     """
     if distortion is not None:
         x, y = undistort_coords(x, y, distortion, camera_matrix)

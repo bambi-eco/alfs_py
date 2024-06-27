@@ -1,5 +1,5 @@
 import copy
-from typing import Optional
+from typing import Optional, Any
 
 from pyrr import Matrix44, Quaternion, Vector3
 
@@ -196,3 +196,33 @@ class Camera:
         :param up: The new up vector (optional)
         """
         self.transform.look_at(target, up)
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        :return: A dictionary that can be used to reconstruct this camera instance.
+        """
+        return {
+            'frustum': self._frustum.to_dict()
+        }
+
+    @staticmethod
+    def from_dict(dictionary: dict[str, Any]) -> Optional['Camera']:
+        """
+        Creates a camera instance from a dictionary of parameters.
+        :return: If the dictionary is missing properties or cannot be used for constructing a camera ``None``;
+        otherwise the constructed camera instance.
+        """
+        if 'frustum' in dictionary:
+            frustum_dict = dictionary['frustum']
+            return Camera.from_frustum(Frustum.from_dict(frustum_dict))
+        else:
+            try:
+                input_dict = {
+                    k: v for k, v in dictionary.items() if k in {
+                        'fovy', 'aspect_ratio', 'orthogonal', 'orthogonal_size', 'near', 'far', 'position', 'rotation',
+                        'forward', 'up'
+                    }
+                }
+                return Camera(**input_dict)
+            except TypeError:
+                pass
