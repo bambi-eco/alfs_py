@@ -6,9 +6,9 @@ from pyrr import Quaternion, Vector3
 from src.core.geo.transform import Transform
 from src.core.rendering.data import Resolution
 from src.core.util.defs import OUTPUT_DIR, INPUT_DIR
-from src.examples.rendering.data import CameraPositioningMode, IntegralSettings
-from src.examples.rendering.render import render_integral
-from src.examples.rendering.render_sp import render_integral_sp
+from src.render.data import CameraPositioningMode, IntegralSettings
+from src.render.render import render_integral
+from src.render.render_sp import render_integral_sp
 
 
 def run() -> None:

@@ -24,7 +24,7 @@ from src.core.util.defs import MAGENTA, BLACK, MAX_TEX_DIM, CPP_INT_MAX, PATH_SE
 from src.core.util.gltf import gltf_extract
 from src.core.util.image import overlay
 from src.core.util.video import video_from_images
-from src.examples.rendering.data import CameraPositioningMode, BaseSettings, BaseAnimationSettings, IntegralSettings, \
+from src.render.data import CameraPositioningMode, BaseSettings, BaseAnimationSettings, IntegralSettings, \
     FocusAnimationSettings, ShutterAnimationSettings
 
 
@@ -433,6 +433,8 @@ def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
     done.total(msg='All done', indent=False)
     return camera
+
+
 
 
 def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,

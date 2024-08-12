@@ -15,8 +15,8 @@ from src.core.sharepoint.sharepoint_shot import SharepointCtxShot
 from src.core.util.basic import get_aabb
 from src.core.util.gltf import glb_extract_from_bytes, gltf_extract_from_bytes
 from src.core.util.image import bytes_to_img
-from src.examples.rendering.data import IntegralSettings, BaseSettings
-from src.examples.rendering.render import make_done_callback, _ensure_or_copy_settings, DoneCallback, make_mgl_context, \
+from src.render.data import IntegralSettings, BaseSettings
+from src.render.render import make_done_callback, _ensure_or_copy_settings, DoneCallback, make_mgl_context, \
     process_render_data, make_camera, _integral_processing, release_all
 
 

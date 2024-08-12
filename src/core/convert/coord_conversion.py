@@ -6,13 +6,12 @@ import cv2
 import numpy as np
 import trimesh
 from numpy.typing import NDArray, ArrayLike
-from pyrr import Vector3, Vector4
+from pyrr import Vector3
 from trimesh import Trimesh
 
-from src.core.conv.data import PixelOrigin, Distortion
+from src.core.convert.data import PixelOrigin, Distortion
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import MeshData
-from src.core.util.basic import nearest_int
 
 
 @cache
@@ -217,14 +216,13 @@ def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, me
     distortion is given, a neutral matrix will be used instead
     :return: If the given pixel coordinates were invalid or did not result in a hit ``None```; otherwise the 3D
     coordinates associated with the given pixel
-    :TODO: Allow x and y to be numpy arrays to convert entire arrays of coordinates.
     """
     x = np.array(x)
     y = np.array(y)
 
     count = len(x)
     if count == 0:
-        return
+        return [None]
 
     if distortion is not None:
         x, y = undistort_coords(x, y, distortion, camera_matrix)

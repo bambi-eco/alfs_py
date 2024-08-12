@@ -2,7 +2,8 @@ import json
 import os
 import random
 from collections import defaultdict
-from typing import Final, cast
+from dataclasses import dataclass
+from typing import Final, cast, Optional
 
 import cv2
 import moderngl as mgl
@@ -10,7 +11,7 @@ import numpy as np
 from pyrr import Matrix44, Vector3, Quaternion
 from trimesh import Trimesh
 
-from src.core.conv.coord_conversion import pixel_to_world_coord, world_to_pixel_coord
+from src.core.convert.coord_conversion import pixel_to_world_coord, world_to_pixel_coord
 from src.core.geo.transform import Transform
 from src.core.rendering.camera import Camera
 from src.core.rendering.data import Resolution
@@ -23,8 +24,8 @@ from src.core.util.gltf import gltf_extract
 from src.core.util.image import split_components
 from src.core.util.moderngl import img_from_fbo
 from src.core.util.pyrrs import rand_quaternion
-from src.examples.rendering.data import IntegralSettings, CameraPositioningMode
-from src.examples.rendering.render import render_integral, DoneCallback
+from src.render.data import IntegralSettings, CameraPositioningMode
+from src.render.render import render_integral, DoneCallback
 
 _OUTPUT_RESOLUTION: Final[tuple[int, int]] = Resolution(1024 * 2, 1024 * 2).as_tuple()
 _CLEAR_COLOR: Final[tuple[float, ...]] = (1.0, 0.0, 1.0, 0.1)
@@ -201,14 +202,18 @@ def test_render_labels() -> None:
 
     # endregion
 
+    @dataclass
+    class FrameData:
+        label_coords: list
+        camera: Optional[Camera]
+
     # region config
 
     input_resolution = Resolution(1024, 1024)
-    render_resolution = Resolution(720 * 10, 720 * 10)
+    render_resolution = Resolution(720 * 16, 720 * 16)
     first_frame_idx = 100  # 4838  # 31500
     last_frame_idx = 10900  # 5238  # 32700
     frame_count = last_frame_idx - first_frame_idx
-    frame_range = range(first_frame_idx, last_frame_idx)
 
     render = False
 
@@ -245,7 +250,7 @@ def test_render_labels() -> None:
         settings = IntegralSettings(
             count=frame_count, initial_skip=first_frame_idx, add_background=True, camera_dist=10.0,
             camera_position_mode=CameraPositioningMode.shot_centered,  fovy=50.0, aspect_ratio=1.0, orthogonal=True,
-            ortho_size=(256, 256), correction=correction, resolution=render_resolution,
+            ortho_size=(320, 320), correction=correction, resolution=render_resolution,
             show_integral=False, output_file=output_file
         )
 
@@ -263,20 +268,19 @@ def test_render_labels() -> None:
         render_camera_dict = json.load(jf)
     render_camera = Camera.from_dict(render_camera_dict)
     if render_camera is None:
-        raise Exception('A' * 5000)
+        raise Exception('No render camera found.')
 
     label_done = DoneCallback('      ')
     print('Start label projection process')
-    print('  Projecting pixels')
 
+    print('  Loading Mesh')
     mesh, _ = gltf_extract(dem_file)
     tri_mesh = Trimesh(vertices=mesh.vertices, faces=mesh.indices)
+    label_done()
 
+    print('  Projecting pixels')
     render = cv2.imread(output_file)
-    frame_data = defaultdict(lambda: {
-        "label_coords": [],
-        "camera": None
-    })
+    frame_data = defaultdict(lambda: FrameData([], None))
 
     with open(labels_file, 'r') as jf:
         label_data = json.load(jf)
@@ -289,7 +293,7 @@ def test_render_labels() -> None:
         for state in label_state_data[label]:
             label_coords = state["pxlCoordinates"][:4]
             color_idx = label
-            frame_data[state["frameIdx"]]["label_coords"].append((color_idx, label_coords))
+            frame_data[state["frameIdx"]].label_coords.append((color_idx, label_coords))
 
     with open(poses_file, 'r') as jf:
         poses_data = json.load(jf)
@@ -307,12 +311,12 @@ def test_render_labels() -> None:
 
         camera = Camera(fovy=fovy, aspect_ratio=1.0, position=position, rotation=rotation)
 
-        frame_data[frame_idx]["camera"] = camera
+        frame_data[frame_idx].camera = camera
 
     for frame, data in frame_data.items():
-        camera = data['camera']
+        camera = data.camera
 
-        for color_idx, poly_coords in data['label_coords']:
+        for color_idx, poly_coords in data.label_coords:
             pixel_xs = []
             pixel_ys = []
             for pixel in poly_coords:
@@ -323,6 +327,7 @@ def test_render_labels() -> None:
             np_poses = world_to_pixel_coord(w_poses, render_resolution.width, render_resolution.height, render_camera)
             poly_lines = [np.array(np_poses).T.reshape((-1, 1, 2))]
             cv2.polylines(render, poly_lines, True, label_colors[color_idx], thickness=1)
+
     label_done()
 
     print('  Saving labeled integral')
