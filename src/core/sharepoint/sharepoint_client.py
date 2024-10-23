@@ -1,23 +1,27 @@
+import json
 import os.path
 import tempfile
-from typing import Generator, Optional, TypeVar, Callable, Union, Type, Final
+from typing import Generator, Optional, TypeVar, Callable, Union, Type, Final, Iterable
 
 import msal
 
-# noinspection PyPackageRequirements
 from office365.entity_collection import EntityCollection
-# noinspection PyPackageRequirements
 from office365.graph_client import GraphClient
-# noinspection PyPackageRequirements
 from office365.onedrive.driveitems.driveItem import DriveItem
-# noinspection PyPackageRequirements
 from office365.onedrive.drives.drive import Drive
-# noinspection PyPackageRequirements
 from office365.onedrive.sites.site import Site
-# noinspection PyPackageRequirements
+from office365.runtime.client_object_collection import ClientObjectCollection
 from office365.runtime.queries.update_entity import UpdateEntityQuery
 
+
+
 class SharepointClient:
+    _T1: Final[Type] = TypeVar('_T1')
+    _T2: Final[Type] = TypeVar('_T2')
+
+    _DEFAULT_URL_BASE: Final[str] = 'https://login.microsoftonline.com/'
+    _DEFAULT_SCOPE: Final[str] = 'https://graph.microsoft.com/.default'
+
     _client_id: str
     _client_secret: str
     _tenant_id: str
@@ -28,13 +32,8 @@ class SharepointClient:
     _site: Site
     _drive: Drive
 
-    _T1 = TypeVar('_T1')
-    _T2 = TypeVar('_T2')
-
-    _URL_BASE: Final[str] = 'https://login.microsoftonline.com/'
-    _SCOPE: Final[str] = 'https://graph.microsoft.com/.default'
-
-    def __init__(self, client_id: str, client_secret: str, tenant_id: str, site: str):
+    def __init__(self, client_id: str, client_secret: str, tenant_id: str, site: str,
+                 url_base: str = _DEFAULT_URL_BASE, scope: str = _DEFAULT_SCOPE) -> None:
         """
         A client that abstracts and facilitates sharepoint access.
         :param client_id: The ID of the azure client to use
@@ -46,14 +45,17 @@ class SharepointClient:
         self._client_secret = client_secret
         self._tenant_id = tenant_id
         self._site_str = site
+        self._url_base = url_base
+        self._scope = scope
+
         self._connected = False
         self._connect()
 
     def _get_token(self) -> dict:
-        authority_url = f'{self._URL_BASE}{self._tenant_id}'
+        authority_url = f'{self._url_base}{self._tenant_id}'
         app = msal.ConfidentialClientApplication(authority=authority_url, client_id=self._client_id,
                                                  client_credential=self._client_secret)
-        token = app.acquire_token_for_client(scopes=[self._SCOPE])
+        token = app.acquire_token_for_client(scopes=[self._scope])
         return token
 
     def _connect(self) -> None:
@@ -63,15 +65,15 @@ class SharepointClient:
             self._drive = self._site.drive.get().execute_query()
             self._connected = True
 
-    def _iterate_collection(self, entities: EntityCollection, max_depth: int = -1, cur_depth: int = 0):
+    def _iterate_collection(self, entities: Iterable[DriveItem], max_depth: int = -1, cur_depth: int = 0) -> Generator[DriveItem, None, None]:
         for drive_item in entities:
             drive_item: DriveItem = drive_item
             yield drive_item
             if drive_item.is_folder and (max_depth <= 0 or cur_depth < max_depth):
-                children = self._drive.items[drive_item.id].children.get().execute_query()
+                children: ClientObjectCollection = self._drive.items[drive_item.id].children.get().execute_query()
                 self._iterate_collection(children, cur_depth + 1, max_depth)
 
-    def iterate_collection(self, entities: EntityCollection, max_depth: int = -1) -> Generator[DriveItem, None, None]:
+    def iterate_collection(self, entities: Iterable[DriveItem], max_depth: int = -1) -> Generator[DriveItem, None, None]:
         """
         Method for iterating though all items in an entity collection associated with the connected drive
         :param entities: The entity collection to be iterated
@@ -142,7 +144,6 @@ class SharepointClient:
     def get_file_bytes(self, item: DriveItem) -> Optional[bytes]:
         """
         Downloads and returns the content of the given item as raw bytes. Does not work for directories.
-        !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
         :param item: The drive item whose content to retrieve
         :return: If there is an error retrieving the data ``None``; otherwise the contents of the given item as raw bytes
         """
@@ -151,7 +152,6 @@ class SharepointClient:
     def get_file_bytes_by_id(self, identifier: str) -> Optional[bytes]:
         """
         Downloads and returns the file associated with the given identifier as raw bytes. Does not work for directories.
-        !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
         :param identifier: The identifier associated with the file to retrieve
         :return: If there is an error retrieving the data ``None``; otherwise the contents of the given file as raw bytes
         """
@@ -160,7 +160,6 @@ class SharepointClient:
     def get_file_bytes_by_path(self, file_path: str) -> Optional[bytes]:
         """
         Downloads and returns the file associated with the given server relative path as raw bytes. Does not work for directories.
-        !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
         :param file_path: The server relative path pointing at the file to retrieve
         :return: If there is an error retrieving the data ``None``; otherwise the contents of the given file as raw bytes
         """
@@ -169,7 +168,6 @@ class SharepointClient:
     def download_item(self, item: DriveItem) -> Optional[str]:
         """
         Downloads the given item to a temporary directory and returns its local location.
-        !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
         :param item: The item to be downloaded
         :return: If the item was not downloaded successfully ``None``; otherwise the location to which the item has been
         downloaded to
@@ -177,18 +175,26 @@ class SharepointClient:
         def func():
             base_name = os.path.basename(item.web_url)
             file_path = os.path.join(tempfile.gettempdir(), base_name)
-            mode = "wb"
-            if base_name.lower().endswith(".json"):
-                mode = "w"
+            content = item.get_content().execute_query()
+            content = content.value
+            if isinstance(content, bytes):
+                mode = "wb+"
+            else:
+                mode = "w+"
+                if not isinstance(content, str):   # sometimes the value is directly parsed to an object
+                    try:
+                        content = json.dumps(content)
+                    except (TypeError, OverflowError):
+                        content = str(content)
+
             with open(file_path, mode) as downloaded_file:
-                item.download(downloaded_file).execute_query()
+                downloaded_file.write(content)
             return file_path
-        return self._try_or_default(func)
+        return self._try_or_default(func, exception_types=tuple())
 
     def download_item_by_id(self, identifier: str) -> Optional[str]:
         """
         Downloads the item associated with the given identifier to a temporary directory and returns its local location.
-        !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
         :param identifier: The identifier associated with the item to download
         :return: If the item was not downloaded successfully ``None``; otherwise the location to which the item has been
         downloaded to
@@ -199,7 +205,6 @@ class SharepointClient:
     def download_item_by_path(self, item_path: str) -> Optional[str]:
         """
         Downloads the item associated with the given server relative path to a temporary directory and returns its local location.
-        !!! Does not work correctly for files with a '.json' extension due to a bug within the Office 365 package !!!
         :param item_path: The server relative path pointing at the item to download
         :return: If the item was not downloaded successfully ``None``; otherwise the location to which the item has been
         downloaded to
@@ -250,8 +255,7 @@ class SharepointClient:
         """
         def func():
             items = []
-            children = item.children.get().execute_query()
-            child: DriveItem
+            children: ClientObjectCollection = item.children.get().execute_query()
             for child in children:
                 items.append(child)
             return items
