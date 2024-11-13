@@ -672,7 +672,6 @@ MigrationBackup/
 # when they are needed.
 /models
 
-### End of Project Specific Rules ###
 /venv*/*
 /tests/bambi/resources/temp/*
 tests/bambi/resources/temp/*.png
@@ -685,3 +684,7 @@ src/bambi/main/dem_tests.ipynb
 /run_log.txt
 /console_log.txt
 /.frames
+/resources/sharepoint*config.json
+/**/tmp*.*
+
+### End of Project Specific Rules ###
