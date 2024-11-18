@@ -1,6 +1,7 @@
 import json
+from logging import getLogger, Logger
 from pathlib import Path
-from typing import Optional, Iterable
+from typing import Optional, Iterable, Final
 
 import moderngl as mgl
 import numpy as np
@@ -15,9 +16,12 @@ from alfspy.core.sharepoint.sharepoint_shot import SharepointCtxShot
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.gltf import glb_extract_from_bytes, gltf_extract_from_bytes
 from alfspy.core.util.image import bytes_to_img
+from alfspy.core.util.loggings import LoggerStep
 from alfspy.render.data import IntegralSettings, BaseSettings
-from alfspy.render.render import make_done_callback, _ensure_or_copy_settings, DoneCallback, make_mgl_context, \
+from alfspy.render.render import _ensure_or_copy_settings, make_mgl_context, \
     process_render_data, make_camera, _integral_processing, release_all
+
+logger: Final[Logger] = getLogger(__name__)
 
 
 def make_sharepoint_client(config_file: str):
@@ -91,32 +95,27 @@ def read_sp_mask(mask_file: str, spc: SharepointClient) -> TextureData:
     return TextureData(mask_img)
 
 
-def _base_steps(done: DoneCallback, scp: SharepointClient, gltf_file: str, shot_json_file: str, mask_file: Optional[str],
+def _base_steps(scp: SharepointClient, gltf_file: str, shot_json_file: str, mask_file: Optional[str],
                 se: BaseSettings) -> tuple[mgl.Context, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
-    print(f'  Reading GLTF file from "{gltf_file}"')
-    mesh_data, texture_data = read_sp_gltf(gltf_file, scp)
-    mesh_data, texture_data = process_render_data(mesh_data, texture_data)
-    done()
+    with LoggerStep(logger, f'Reading GLTF file from "{gltf_file}"'):
+        mesh_data, texture_data = read_sp_gltf(gltf_file, scp)
+        mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
-    print('  Creating MGL context')
-    ctx = make_mgl_context()
-    done()
+    with LoggerStep(logger, 'Creating MGL context'):
+        ctx = make_mgl_context()
 
-    print(f'  Extracting shots from "{shot_json_file}" (Creating lazy shots: {se.lazy})')
-    shots = read_sp_shots(shot_json_file, scp, ctx, se)
-    done()
+    with LoggerStep(logger, f'Extracting shots from "{shot_json_file}" (Creating lazy shots: {se.lazy})'):
+        shots = read_sp_shots(shot_json_file, scp, ctx, se)
 
-    print(f'  Creating camera and renderer (camera position mode: {se.camera_position_mode.name})')
-    mesh_aabb = get_aabb(mesh_data.vertices)
-    camera = make_camera(mesh_aabb, shots, se)
-    print(f'    Computed camera position: {camera.transform.position}')
-    renderer = Renderer(se.resolution, ctx, camera, mesh_data, texture_data)
-    done()
+    with LoggerStep(logger,f'Creating camera and renderer (camera position mode: {se.camera_position_mode.name})'):
+        mesh_aabb = get_aabb(mesh_data.vertices)
+        camera = make_camera(mesh_aabb, shots, se)
+        logger.info(f'Computed camera position: {camera.transform.position}')
+        renderer = Renderer(se.resolution, ctx, camera, mesh_data, texture_data)
 
     if mask_file is not None:
-        print(f'  Reading mask from "{mask_file}"')
-        mask = read_sp_mask(mask_file, scp)
-        done()
+        with LoggerStep(logger, f'Reading mask from "{mask_file}"'):
+            mask = read_sp_mask(mask_file, scp)
     else:
         mask = None
 
@@ -125,40 +124,35 @@ def _base_steps(done: DoneCallback, scp: SharepointClient, gltf_file: str, shot_
 
 def render_integral_sp(config_file: str, gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                     settings: Optional[IntegralSettings] = None) -> None:
-    done = make_done_callback()
-    print('Start projection process')
+    _set_logger()
 
-    # region Initializing
+    with LoggerStep(logger, 'Start Render Integral [SharePoint]', 'All done'):
 
-    print('  Initializing')
-    se = _ensure_or_copy_settings(settings, IntegralSettings)
-    done()
+        # region Initializing
 
-    # endregion
+        with LoggerStep(logger, 'Initializing'):
+            se = _ensure_or_copy_settings(settings, IntegralSettings)
 
-    # region Create sharepoint client
+        # endregion
 
-    print('  Creating Sharepoint client')
-    scp = make_sharepoint_client(config_file)
-    done()
+        # region Create sharepoint client
 
-    # endregion
+        with LoggerStep(logger, 'Creating Sharepoint client'):
+            scp = make_sharepoint_client(config_file)
 
-    ctx, _, renderer, shots, mask = _base_steps(done, scp, gltf_file, shot_json_file, mask_file, se)
+        # endregion
 
-# region Rendering Integral
+        ctx, _, renderer, shots, mask = _base_steps(scp, gltf_file, shot_json_file, mask_file, se)
 
-    print(f'  Projecting shots (Releasing shots after projection: {se.release_shots})')
-    shot_loader = make_sp_shot_loader(shots)
-    result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=se.release_shots)
-    done()
+        # region Rendering Integral
 
-    # endregion
+        with LoggerStep(logger, f'Projecting shots (Releasing shots after projection: {se.release_shots})'):
+            shot_loader = make_sp_shot_loader(shots)
+            result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=se.release_shots)
 
-    _integral_processing(done, renderer, result, se)
+        # endregion
 
-    print('  Release all resources')
-    release_all(ctx, renderer, shots)
-    done()
+        _integral_processing(renderer, result, se)
 
-    done.total(msg='All done', indent=False)
+        with LoggerStep(logger, '  Release all resources'):
+            release_all(ctx, renderer, shots)

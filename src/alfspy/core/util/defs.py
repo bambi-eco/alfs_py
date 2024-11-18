@@ -21,6 +21,8 @@ Color: Type = Union[Number, tuple[Number, Number, Number], tuple[Number, Number,
 class StrEnum(str, Enum):
     pass
 
+# META
+PACKAGE_NAME: Final[str] = __name__.split('.')[0]
 
 # DIRECTORIES
 MODULE_DIR: Final[str] = str(pathlib.Path(__file__).parent.parent.parent.absolute())
@@ -41,7 +43,9 @@ LEFT: Final[Vector3] = Vector3([-1, 0, 0], dtype=float)
 
 
 if __name__ == '__main__':
-    globs = globals().copy()
-    for name, value in globs.items():
-        if not name.startswith('__') and name.isupper():
-            print(f'{name}: {value}')
+    def main() -> None:
+        globs = globals().copy()
+        for name, value in globs.items():
+            if not name.startswith('__') and name.isupper():
+                print(f'{name}: {value}')
+    main()

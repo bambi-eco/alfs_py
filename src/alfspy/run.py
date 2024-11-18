@@ -1,3 +1,7 @@
+from alfspy.core.util.loggings import apply_default_config
+
+apply_default_config()
+
 import os
 from typing import Final
 
@@ -7,9 +11,7 @@ from pyrr import Quaternion, Vector3
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.data import Resolution
 from alfspy.core.util.defs import MODULE_DIR
-from alfspy.render.data import CameraPositioningMode, IntegralSettings
-from alfspy.render.render import render_integral
-from alfspy.render.render_sp import render_integral_sp
+from alfspy.render import CameraPositioningMode, IntegralSettings, render_integral, render_integral_sp
 
 OUTPUT_DIR: Final[str] = os.path.join(MODULE_DIR, '..', '..', 'output')
 INPUT_DIR: Final[str] = os.path.join(MODULE_DIR, '..', '..', 'input')
@@ -20,8 +22,8 @@ def run() -> None:
     if bambi_dev_dir is None:
         raise EnvironmentError('BAMBI_DEV_DIR environment variable not set')
 
-    data_set = os.path.join('FH', '2023_04_04_Hagenberg', 'M30T', 'KFV-hgb-Enew')  # NeRF Grid'
-    gltf_file = os.path.join(bambi_dev_dir, 'MISC', 'DEM', 'Hagenberg', 'dem_mesh_r2.glb')
+    data_set = os.path.join('Spektakulair', '2023_10_05_NOe_Purkersdorf', '1581F5FJB22A700A0DW3_M3TE', '104_Schwarzwild')
+    gltf_file = os.path.join(bambi_dev_dir, 'Processed', data_set, 'Data', 'dem', 'dem_mesh_r2.glb')
 
     # for frame_type in ['w', 't']:
     for frame_type in ('t',):
@@ -29,15 +31,14 @@ def run() -> None:
         mask_file = os.path.join(bambi_dev_dir, 'Processed', data_set, f'Frames_{frame_type}', f'mask_{frame_type}.png')
         count = 10
         if frame_type == 't':
-            center = 35500
+            center = 5500
         elif frame_type == 'w':
-            center = 35820
+            center = 5820
         else:
             center = count // 2
         first = center - count // 2
 
         for i in range(3):
-
             translation = Vector3([0.0, 0.0, 2.0 * (i / 3)], dtype='f4')
             rotation = Quaternion.from_z_rotation(np.deg2rad(2.0), dtype='f4')
             correction = Transform(position=translation, rotation=rotation)

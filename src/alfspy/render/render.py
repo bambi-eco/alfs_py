@@ -1,9 +1,9 @@
 import os
-import time
 from collections import defaultdict
 from copy import copy
 from functools import cache
-from typing import Optional, Iterable, Callable, Sequence, cast, Protocol, Union, TypeVar, Type
+from logging import getLogger, Logger
+from typing import Optional, Iterable, Callable, Sequence, cast, Protocol, Union, TypeVar, Type, Final
 
 import cv2
 import moderngl as mgl
@@ -25,10 +25,10 @@ from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.gltf import gltf_extract
 from alfspy.core.util.image import overlay
 from alfspy.core.util.io import delete_all
+from alfspy.core.util.loggings import LoggerStep
 from alfspy.core.util.video import video_from_images
 from alfspy.render.data import CameraPositioningMode, BaseSettings, BaseAnimationSettings, IntegralSettings, \
     FocusAnimationSettings, ShutterAnimationSettings
-
 
 class Releasable(Protocol):
     """
@@ -38,36 +38,7 @@ class Releasable(Protocol):
     def release(self) -> None:
         pass
 
-
-class DoneCallback:
-    """
-    Logging callback that prints a message and the time that has passed since the last call.
-    """
-
-    def __init__(self, indent: Optional[str] = None) -> None:
-        self.indent = indent if indent is not None else ''
-        self.start = time.time()
-        self.last = self.start
-
-    def _print(self, log_time: float, msg: str = 'Done', indent: bool = True) -> None:
-        print(f'{self.indent if indent else ""}{msg + " "}[{log_time * 1000:.3f} ms]')
-
-    def __call__(self, print_msg: bool = True, msg: str = 'Done', indent: bool = True) -> None:
-        """
-        Prints the time since the previous call and optionally a prefixed message.
-        :param print_msg: Whether a message should be printed.
-        :param msg: The message to be printed.
-        :param indent: Whether the message should be prefixed with the indent associated with this callback.
-        """
-        current = time.time()
-        if print_msg:
-            self._print(current - self.last, msg, indent)
-        self.last = current
-
-    def total(self, msg: str = 'Done', indent: bool = True) -> None:
-        current = time.time()
-        self._print(current - self.start, msg, indent)
-
+logger: Final[Logger] = getLogger(__name__)
 
 # region Camera helpers
 
@@ -124,13 +95,6 @@ def _get_camera_position(mode: CameraPositioningMode, camera_dist: float, backgr
 
 # region Common functionality
 
-def make_done_callback() -> DoneCallback:
-    """
-    Creates a done callback. Ensures all examples use the same parameters when using a done callback.
-    :return: A ``DoneCallback`` instance.
-    """
-    return DoneCallback('    ')
-
 
 def make_shot_loader(shots: Iterable[CtxShot]) -> Iterable[CtxShot]:
     """
@@ -163,11 +127,11 @@ def process_render_data(mesh_data: Optional[MeshData],
 
     if texture_data is None:
         texture_data = TextureData(gen_checkerboard_tex(8, 8, MAGENTA, BLACK, dtype='f4'))
-        print(f'    No texture extracted: Default texture was generated')
+        logger.info(f'No texture extracted: Default texture was generated')
     else:
         byte_size = texture_data.byte_size(dtype='f4')
         width, height = texture_data.texture.shape[1::-1]
-        print(f'    Texture extracted: ({width}, {height}) x {texture_data.texture.shape[2]} [{byte_size} B]')
+        logger.info(f'Texture extracted: ({width}, {height}) x {texture_data.texture.shape[2]} [{byte_size} B]')
 
         if width > MAX_TEX_DIM or height > MAX_TEX_DIM:
             if width > height:
@@ -175,14 +139,14 @@ def process_render_data(mesh_data: Optional[MeshData],
             else:
                 fact = MAX_TEX_DIM / height
             texture_data.texture = cv2.resize(texture_data.texture, None, fx=fact, fy=fact)
-            print(f'    Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
-                  f'to fit texture dimension restriction of {MAX_TEX_DIM}px')
+            logger.info(f'Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+                        f'to fit texture dimension restriction of {MAX_TEX_DIM}px')
             byte_size = texture_data.byte_size(dtype='f4')
 
         if byte_size > CPP_INT_MAX:
             texture_data.scale_to_fit(CPP_INT_MAX, dtype='f4')  # necessary since moderngl uses this data type
-            print(f'    Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
-                  f'to fit size restriction of {CPP_INT_MAX} B')
+            logger.info(f'Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
+                        f'to fit size restriction of {CPP_INT_MAX} B')
 
     return mesh_data, texture_data
 
@@ -286,52 +250,45 @@ def _ensure_or_copy_settings(se: Optional[S], cls: Type[S]) -> S:
         return copy(se)
 
 
-def _base_steps(done: DoneCallback, gltf_file: str, shot_json_file: str, mask_file: Optional[str],
+def _base_steps(gltf_file: str, shot_json_file: str, mask_file: Optional[str],
                 se: BaseSettings) -> tuple[mgl.Context, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
-    print(f'  Reading GLTF file from "{gltf_file}"')
-    mesh_data, texture_data = read_gltf(gltf_file)
-    mesh_data, texture_data = process_render_data(mesh_data, texture_data)
-    done()
+    with LoggerStep(logger, f'Reading GLTF file from "{gltf_file}"'):
+        mesh_data, texture_data = read_gltf(gltf_file)
+        mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
-    print('  Creating MGL context')
-    ctx = make_mgl_context()
-    done()
+    with LoggerStep(logger, 'Creating MGL context'):
+        ctx = make_mgl_context()
 
-    print(f'  Extracting shots from "{shot_json_file}" (Creating lazy shots: {se.lazy})')
-    shots = read_shots(shot_json_file, ctx, se)
-    done()
+    with LoggerStep(logger,f'Extracting shots from "{shot_json_file}" (Creating lazy shots: {se.lazy})'):
+        shots = read_shots(shot_json_file, ctx, se)
 
-    print(f'  Creating camera and renderer (camera position mode: {se.camera_position_mode.name})')
-    mesh_aabb = get_aabb(mesh_data.vertices)
-    camera = make_camera(mesh_aabb, shots, se)
-    print(f'    Computed camera position: {camera.transform.position}')
-    renderer = Renderer(se.resolution, ctx, camera, mesh_data, texture_data)
-    done()
+    with LoggerStep(logger,f'Creating camera and renderer (camera position mode: {se.camera_position_mode.name})'):
+        mesh_aabb = get_aabb(mesh_data.vertices)
+        camera = make_camera(mesh_aabb, shots, se)
+        logger.info(f'Computed camera position: {camera.transform.position}')
+        renderer = Renderer(se.resolution, ctx, camera, mesh_data, texture_data)
 
     if mask_file is not None:
-        print(f'  Reading mask from "{mask_file}"')
-        mask = read_mask(mask_file)
-        done()
+        with LoggerStep(logger,f'Reading mask from "{mask_file}"'):
+            mask = read_mask(mask_file)
     else:
         mask = None
 
     return ctx, camera, renderer, shots, mask
 
 
-def _integral_processing(done: DoneCallback, renderer: Renderer, integral: NDArray, se: IntegralSettings) -> None:
+def _integral_processing(renderer: Renderer, integral: NDArray, se: IntegralSettings) -> None:
     # region Adding Background
 
     if se.add_background:
-        print('  Rendering background')
-        background = renderer.render_background()
-        done()
+        with LoggerStep(logger, 'Rendering background'):
+            background = renderer.render_background()
 
-        print('  Laying integral over background')
-        img = overlay(background, integral)
-        im_pil = Image.fromarray(img)
-        done()
+        with LoggerStep(logger, 'Laying integral over background'):
+            img = overlay(background, integral)
+            im_pil = Image.fromarray(img)
     else:
-        print(' Converting array to PIL image')
+        logger.info('Converting array to PIL image')
         im_pil = Image.fromarray(integral)
 
     # endregion
@@ -339,282 +296,247 @@ def _integral_processing(done: DoneCallback, renderer: Renderer, integral: NDArr
     # region Showing Integral
 
     if se.show_integral:
-        print('  Showing integral')
-        im_pil.show('Integral')
-        done()
+        with LoggerStep(logger, 'Showing integral'):
+            im_pil.show('Integral')
 
     # endregion
 
     # region Saving Integral
 
-    print(f'  Saving integral image to "{se.output_file}"')
-    if '.' not in se.output_file:
-        se.output_file += '.png'
-    im_pil.save(se.output_file)
-    done()
+    with LoggerStep(logger, f'Saving integral image to "{se.output_file}"'):
+        if '.' not in se.output_file:
+            se.output_file += '.png'
+        im_pil.save(se.output_file)
 
     # endregion
 
 
-def _frame_processing(done: DoneCallback, frame_files: Sequence[str], se: BaseAnimationSettings) -> None:
-    print('  Creating video file')
-    create_video(frame_files, se)
-    done()
+def _frame_processing(frame_files: Sequence[str], se: BaseAnimationSettings) -> None:
+    with LoggerStep(logger, 'Creating video file'):
+        create_video(frame_files, se)
 
     if se.delete_frames:
-        print('  Deleting frames')
-        delete_all(frame_files)
-        done()
+        with LoggerStep(logger, 'Deleting frames'):
+            delete_all(frame_files)
 
 
 # endregion
 
 def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                   settings: Optional[IntegralSettings] = None) -> None:
-    done = make_done_callback()
-    print('Start projection process')
+    with LoggerStep(logger, 'Start Project Shots', 'All done'):
 
-    # region Initializing
+        # region Initializing
 
-    print('  Initializing')
-    se = _ensure_or_copy_settings(settings, IntegralSettings)
-    done()
+        with LoggerStep(logger, 'Initializing'):
+            se = _ensure_or_copy_settings(settings, IntegralSettings)
 
-    # endregion
+        # endregion
 
-    ctx, _, renderer, shots, mask = _base_steps(done, gltf_file, shot_json_file, mask_file, se)
+        ctx, _, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
 
-    # region Projecting Shots
+        # region Projecting Shots
 
-    print(f'  Projecting shots (Releasing shots after projection: {se.release_shots})')
-    shot_loader = make_shot_loader(shots)
-    result = renderer.project_shots(shot_loader, RenderResultMode.ShotOnly, mask=mask, integral=True, save=False,
-                                    release_shots=se.release_shots)
-    done()
+        with LoggerStep(logger, f'Projecting shots (Releasing shots after projection: {se.release_shots})'):
+            shot_loader = make_shot_loader(shots)
+            result = renderer.project_shots(shot_loader, RenderResultMode.ShotOnly, mask=mask, integral=True, save=False,
+                                            release_shots=se.release_shots)
 
-    # endregion
+        # endregion
 
-    _integral_processing(done, renderer, result, se)
+        _integral_processing(renderer, result, se)
 
-    print('  Release all resources')
-    release_all(ctx, renderer, shots)
-    done()
-
-    done.total(msg='All done', indent=False)
+        with LoggerStep(logger, 'Release all resources'):
+            release_all(ctx, renderer, shots)
 
 
 def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                     settings: Optional[IntegralSettings] = None) -> Camera:
-    done = make_done_callback()
-    print('Start projection process')
+    with LoggerStep(logger, 'Start Render Integral', 'All done'):
 
-    # region Initializing
+        # region Initializing
 
-    print('  Initializing')
-    se = _ensure_or_copy_settings(settings, IntegralSettings)
-    done()
+        with LoggerStep(logger, 'Initializing'):
+            se = _ensure_or_copy_settings(settings, IntegralSettings)
 
-    # endregion
+        # endregion
 
-    ctx, camera, renderer, shots, mask = _base_steps(done, gltf_file, shot_json_file, mask_file, se)
+        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
 
-    # region Rendering Integral
+        # region Rendering Integral
 
-    print(f'  Projecting shots (Releasing shots after projection: {se.release_shots})')
-    shot_loader = make_shot_loader(shots)
-    result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=se.release_shots)
-    done()
+        with LoggerStep(logger, f'Projecting shots (Releasing shots after projection: {se.release_shots})'):
+            shot_loader = make_shot_loader(shots)
+            result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=se.release_shots)
 
-    # endregion
+        # endregion
 
-    _integral_processing(done, renderer, result, se)
+        _integral_processing(renderer, result, se)
 
-    print('  Release all resources')
-    release_all(ctx, renderer, shots)
-    done()
+        with LoggerStep(logger, 'Release all resources'):
+            release_all(ctx, renderer, shots)
 
-    done.total(msg='All done', indent=False)
-    return camera
+        return camera
 
 
 
 
 def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                   settings: Optional[FocusAnimationSettings] = None) -> None:
-    done = make_done_callback()
-    print('Start focus animation process')
+    with LoggerStep(logger, 'Start Animate Focus', 'All done'):
 
-    # region Initializing
+        # region Initializing
 
-    print('  Initializing')
-    se = _ensure_or_copy_settings(settings, FocusAnimationSettings)
+        with LoggerStep(logger, 'Initializing'):
+            se = _ensure_or_copy_settings(settings, FocusAnimationSettings)
 
-    if se.correction is None:
-        se.correction = Transform()
+            if se.correction is None:
+                se.correction = Transform()
 
-    se.correction.position.z = se.start_focus
+            se.correction.position.z = se.start_focus
 
-    done()
+        # endregion
 
-    # endregion
+        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
 
-    ctx, camera, renderer, shots, mask = _base_steps(done, gltf_file, shot_json_file, mask_file, se)
+        # region Frame Rendering
 
-    # region Frame Rendering
+        with LoggerStep(logger, f'Creating Frames (Frames to be rendered: {se.frame_count}; Focus: {se.start_focus} -> {se.end_focus})'):
 
-    print(f'  Creating Frames (Frames to be rendered: {se.frame_count}; Focus: {se.start_focus} -> {se.end_focus})')
-    frame_done = DoneCallback('      ')
+            if not se.frame_dir.endswith(PATH_SEP):
+                se.frame_dir += PATH_SEP
+            os.makedirs(se.frame_dir, exist_ok=True)
 
-    if not se.frame_dir.endswith(PATH_SEP):
-        se.frame_dir += PATH_SEP
-    os.makedirs(se.frame_dir, exist_ok=True)
+            range_focus = se.end_focus - se.start_focus
+            focus_step = range_focus / se.frame_count
+            logger.info(f'Using focus step: {focus_step}')
+            frame_files = []
 
-    range_focus = se.end_focus - se.start_focus
-    focus_step = range_focus / se.frame_count
-    print(f'    Focus step: {focus_step}')
-    frame_files = []
+            if se.move_camera_with_focus:
+                camera.transform.position.z -= se.start_focus
+                renderer.apply_matrices()
 
-    if se.move_camera_with_focus:
-        camera.transform.position.z -= se.start_focus
-        renderer.apply_matrices()
+            release_shots = se.release_shots
+            add_background = se.add_background
+            frame_dir = se.frame_dir
+            move_camera_with_focus = se.move_camera_with_focus
 
-    release_shots = se.release_shots
-    add_background = se.add_background
-    frame_dir = se.frame_dir
-    move_camera_with_focus = se.move_camera_with_focus
-
-    # background needs to be rendered only once when camera is not moving
-    if add_background and not move_camera_with_focus:
-        background = renderer.render_background()
-    else:
-        background = None
-
-    for i in range(se.frame_count):
-        print(f'    Creating frame {i}')
-        shots_copy = [shot.create_anew() for shot in shots]
-        shot_loader = make_shot_loader(shots_copy)
-        result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
-
-        if add_background:
-            if move_camera_with_focus:
+            # background needs to be rendered only once when camera is not moving
+            if add_background and not move_camera_with_focus:
                 background = renderer.render_background()
-            img = overlay(background, result)
-        else:
-            img = result
+            else:
+                background = None
 
-        im_pil = Image.fromarray(img)
-        frame_file = f'{frame_dir}{i}.png'
-        im_pil.save(frame_file)
-        frame_files.append(frame_file)
+            for i in range(se.frame_count):
+                print(f'Creating frame {i}')
+                shots_copy = [shot.create_anew() for shot in shots]
+                shot_loader = make_shot_loader(shots_copy)
+                result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
 
-        del shot_loader
-        del img
-        del im_pil
+                if add_background:
+                    if move_camera_with_focus:
+                        background = renderer.render_background()
+                    img = overlay(background, result)
+                else:
+                    img = result
 
-        for shot in shots:
-            shot.correction.position.z += focus_step
-        if move_camera_with_focus:
-            camera.transform.position.z -= focus_step
-            renderer.apply_matrices()
+                im_pil = Image.fromarray(img)
+                frame_file = f'{frame_dir}{i}.png'
+                im_pil.save(frame_file)
+                frame_files.append(frame_file)
 
-        frame_done()
-    done()
+                del shot_loader
+                del img
+                del im_pil
 
-    # endregion
+                for shot in shots:
+                    shot.correction.position.z += focus_step
+                if move_camera_with_focus:
+                    camera.transform.position.z -= focus_step
+                    renderer.apply_matrices()
 
-    _frame_processing(done, frame_files, se)
+        # endregion
 
-    print('  Release all resources')
-    release_all(ctx, renderer, shots)
-    done()
+        _frame_processing(frame_files, se)
 
-    done.total(msg='All done', indent=False)
+        with LoggerStep(logger, 'Release all resources'):
+            release_all(ctx, renderer, shots)
 
 
 def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                     settings: Optional[ShutterAnimationSettings] = None) -> None:
-    done = make_done_callback()
-    print('Start shutter animation process')
+    with LoggerStep(logger, 'Start Animate Shutter', 'All done'):
 
-    # region Initializing
-    print('  Initializing')
-    se = _ensure_or_copy_settings(settings, ShutterAnimationSettings)
-    done()
+        # region Initializing
+        with LoggerStep(logger, 'Initializing'):
+            se = _ensure_or_copy_settings(settings, ShutterAnimationSettings)
 
-    # endregion
+        # endregion
 
-    ctx, camera, renderer, shots, mask = _base_steps(done, gltf_file, shot_json_file, mask_file, se)
+        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
 
-    # region Render Background
+        # region Render Background
 
-    if se.add_background:
-        print('  Rendering background')
-        background = renderer.render_background()
-        done()
-    else:
-        background = None
-
-    # endregion
-
-    # region Frame Rendering
-
-    print(f'  Creating Frames (Frames to be rendered: {se.frame_count})')
-    frame_done = DoneCallback('      ')
-
-    if not se.frame_dir.endswith(PATH_SEP):
-        se.frame_dir += PATH_SEP
-    os.makedirs(se.frame_dir, exist_ok=True)
-
-    frame_files = []
-
-    shot_count = len(shots)
-    max_shot_count = shot_count - se.reference_index
-
-    shots_grow_func = se.shots_grow_func
-    grow_symmetrical = se.grow_symmetrical
-    reference_index = se.reference_index
-    release_shots = se.release_shots
-    add_background = se.add_background
-    frame_dir = se.frame_dir
-
-    cur_frame = 0
-    cur_grow_size = 0
-    while cur_grow_size < max_shot_count:
-        print(f'    Creating frame {cur_frame}')
-
-        # recreate shots
-        cur_grow_size += shots_grow_func(cur_frame)
-        if grow_symmetrical:
-            first = max(reference_index - cur_grow_size, 0)
+        if se.add_background:
+            with LoggerStep(logger, 'Rendering background'):
+                background = renderer.render_background()
         else:
-            first = reference_index
-        last = min(reference_index + cur_grow_size + 1, shot_count)
+            background = None
 
-        shots_copy = [shot.create_anew() for shot in shots[first:last]]
-        shot_loader = make_shot_loader(shots_copy)
+        # endregion
 
-        result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
-        if add_background:
-            result = overlay(background, result)
-        im_pil = Image.fromarray(result)
-        frame_file = f'{frame_dir}{cur_frame}.png'
-        im_pil.save(frame_file)
-        frame_files.append(frame_file)
+        # region Frame Rendering
 
-        del shot_loader
-        del result
-        del im_pil
+        with LoggerStep(logger, f'Creating Frames (Frames to be rendered: {se.frame_count})'):
+            if not se.frame_dir.endswith(PATH_SEP):
+                se.frame_dir += PATH_SEP
+            os.makedirs(se.frame_dir, exist_ok=True)
 
-        cur_frame += 1
-        frame_done()
-    done()
+            frame_files = []
 
-    # endregion
+            shot_count = len(shots)
+            max_shot_count = shot_count - se.reference_index
 
-    _frame_processing(done, frame_files, se)
+            shots_grow_func = se.shots_grow_func
+            grow_symmetrical = se.grow_symmetrical
+            reference_index = se.reference_index
+            release_shots = se.release_shots
+            add_background = se.add_background
+            frame_dir = se.frame_dir
 
-    print('  Release all resources')
-    release_all(ctx, renderer, shots)
-    done()
+            cur_frame = 0
+            cur_grow_size = 0
+            while cur_grow_size < max_shot_count:
+                logger.info(f'Creating frame {cur_frame}')
 
-    done.total(msg='All done', indent=False)
+                # recreate shots
+                cur_grow_size += shots_grow_func(cur_frame)
+                if grow_symmetrical:
+                    first = max(reference_index - cur_grow_size, 0)
+                else:
+                    first = reference_index
+                last = min(reference_index + cur_grow_size + 1, shot_count)
+
+                shots_copy = [shot.create_anew() for shot in shots[first:last]]
+                shot_loader = make_shot_loader(shots_copy)
+
+                result = renderer.render_integral(shot_loader, mask=mask, save=False, release_shots=release_shots)
+                if add_background:
+                    result = overlay(background, result)
+                im_pil = Image.fromarray(result)
+                frame_file = f'{frame_dir}{cur_frame}.png'
+                im_pil.save(frame_file)
+                frame_files.append(frame_file)
+
+                del shot_loader
+                del result
+                del im_pil
+
+                cur_frame += 1
+
+        # endregion
+
+        _frame_processing(frame_files, se)
+
+        with LoggerStep(logger, 'Release all resources'):
+            release_all(ctx, renderer, shots)
