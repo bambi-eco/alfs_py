@@ -23,9 +23,9 @@ class Transform:
         :param scale: The scale along each axis (optional).
         :param dtype: The dtype to be used for floating point values (defaults to f4).
         """
-        self._position = Vector3(position) if position is not None else Vector3([0.0, 0.0, 0.0], dtype=dtype)
-        self._rotation = Quaternion(rotation) if rotation is not None else Quaternion([0.0, 0.0, 0.0, 1.0], dtype=dtype)
-        self._scale = Vector3(scale) if scale is not None else Vector3([1.0, 1.0, 1.0], dtype=dtype)
+        self._position = Vector3(position, dtype=dtype) if position is not None else Vector3([0.0, 0.0, 0.0], dtype=dtype)
+        self._rotation = Quaternion(rotation, dtype=dtype) if rotation is not None else Quaternion([0.0, 0.0, 0.0, 1.0], dtype=dtype)
+        self._scale = Vector3(scale, dtype=dtype) if scale is not None else Vector3([1.0, 1.0, 1.0], dtype=dtype)
         self.dtype = dtype
 
     @staticmethod

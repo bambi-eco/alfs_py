@@ -65,6 +65,14 @@ class TextureData:
         img = img[::-1, ...]  # flip image vertically for moderngl
         return img.astype('f4').tobytes()
 
+    @property
+    def width(self) -> int:
+        return self.texture.shape[1]
+
+    @property
+    def height(self) -> int:
+        return self.texture.shape[0]
+
     def tex_gen_input(self) -> tuple[tuple[int, int], int, bytes]:
         """
         Returns a tuple representing the required input for creating a ModernGL texture object via ``Context.texture``.

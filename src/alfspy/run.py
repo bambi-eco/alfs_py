@@ -22,29 +22,30 @@ def run() -> None:
     if bambi_dev_dir is None:
         raise EnvironmentError('BAMBI_DEV_DIR environment variable not set')
 
-    data_set = os.path.join('Spektakulair', '2023_10_05_NOe_Purkersdorf', '1581F5FJB22A700A0DW3_M3TE', '104_Schwarzwild')
+    data_set = os.path.join('BW', '2023_01_18_Ktn_Feldreh_Zollfelf', '1581F5FJB22A700A0DV7_M3TE', '010_Feldreh_Zoll')
+    # data_set = os.path.join('Spektakulair', '2023_10_05_NOe_Purkersdorf', '1581F5FJB22A700A0DW3_M3TE', '104_Schwarzwild')
     gltf_file = os.path.join(bambi_dev_dir, 'Processed', data_set, 'Data', 'dem', 'dem_mesh_r2.glb')
 
     # for frame_type in ['w', 't']:
     for frame_type in ('t',):
-        shot_json_file = os.path.join(bambi_dev_dir, 'Processed', data_set, f'Frames_{frame_type}', 'poses.json')
+        shot_json_file = os.path.join(bambi_dev_dir, 'Processed', data_set, f'Frames_{frame_type}', 'matched_poses.json')
         mask_file = os.path.join(bambi_dev_dir, 'Processed', data_set, f'Frames_{frame_type}', f'mask_{frame_type}.png')
-        count = 10
+        count = 20
         if frame_type == 't':
-            center = 5500
+            center = 22999
         elif frame_type == 'w':
             center = 5820
         else:
             center = count // 2
         first = center - count // 2
 
-        for i in range(3):
+        for i in range(1):
             translation = Vector3([0.0, 0.0, 2.0 * (i / 3)], dtype='f4')
             rotation = Quaternion.from_z_rotation(np.deg2rad(2.0), dtype='f4')
             correction = Transform(position=translation, rotation=rotation)
             output_file = os.path.join(OUTPUT_DIR, f'integral_{i}.png')
             settings = IntegralSettings(count=count, initial_skip=first, camera_dist=10.0, add_background=False,
-                                        camera_position_mode=CameraPositioningMode.AverageShot,
+                                        camera_position_mode=CameraPositioningMode.CenterShot,
                                         correction=correction, resolution=Resolution(1024 * 2, 1024 * 2),
                                         fovy=50.0, aspect_ratio=1.0, ortho_size=(65, 65),
                                         orthogonal=False, show_integral=False, output_file=output_file)

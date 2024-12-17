@@ -25,7 +25,7 @@ from alfspy.core.util.image import split_components
 from alfspy.core.util.moderngl import img_from_fbo
 from alfspy.core.util.pyrrs import rand_quaternion
 from alfspy.render.data import IntegralSettings, CameraPositioningMode
-from alfspy.render.render import render_integral, DoneCallback
+from alfspy.render.render import render_integral, LoggerCallback
 
 
 
@@ -285,7 +285,7 @@ def test_render_labels() -> None:
     if render_camera is None:
         raise Exception('No render camera found.')
 
-    label_done = DoneCallback('      ')
+    label_done = LoggerCallback('      ')
     print('Start label projection process')
 
     print('  Loading Mesh')

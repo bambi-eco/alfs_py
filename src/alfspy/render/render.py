@@ -379,8 +379,6 @@ def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str
         return camera
 
 
-
-
 def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
                   settings: Optional[FocusAnimationSettings] = None) -> None:
     with LoggerStep(logger, 'Start Animate Focus', 'All done'):

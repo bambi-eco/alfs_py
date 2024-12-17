@@ -21,11 +21,17 @@ def _get_from_buffer(idx: int, gltf: GLTF, comp: int, dtype: str = 'f4') -> NDAr
     :param dtype: The type the read values should be converted to.
     :return: A numpy array representing all read vectors.
     """
-    buffer = gltf.resources[0].data
-    accessor = list(filter(lambda acc: acc.bufferView == idx, gltf.model.accessors))[0]
+    accessor = gltf.model.accessors[idx]
     buf_view = gltf.model.bufferViews[accessor.bufferView]
-    data_bytes = buffer[buf_view.byteOffset:buf_view.byteOffset + buf_view.byteLength]
-    return np.frombuffer(data_bytes, dtype=dtype).reshape((-1, comp))
+    buffer = gltf.resources[0].data
+
+    byte_offset = buf_view.byteOffset + (accessor.byteOffset or 0)
+    byte_stride = buf_view.byteStride or (comp * np.dtype(dtype).itemsize)
+
+    data_bytes = buffer[byte_offset: byte_offset + buf_view.byteLength]
+    raw_data = np.frombuffer(data_bytes, dtype=dtype)
+    data = np.lib.stride_tricks.as_strided(raw_data, shape=(accessor.count, comp), strides=(byte_stride, raw_data.itemsize))
+    return data.copy()
 
 
 def gltf_to_mesh_data(gltf: GLTF, transform: Optional[Transform] = None) -> Optional[MeshData]:
@@ -39,12 +45,17 @@ def gltf_to_mesh_data(gltf: GLTF, transform: Optional[Transform] = None) -> Opti
     """
     if len(gltf.model.meshes) < 1 or len(gltf.model.meshes[0].primitives) < 1:
         return None
-    mesh_attrs = gltf.model.meshes[0].primitives[0].attributes
+
+    primitive = gltf.model.meshes[0].primitives[0]
+    mesh_attrs = primitive.attributes
 
     vertices = _get_from_buffer(mesh_attrs.POSITION, gltf, 3)
 
-    indices_idx = gltf.model.meshes[0].primitives[0].indices
-    indices = _get_from_buffer(indices_idx, gltf, 3, dtype='u4') if indices_idx is not None else None
+    indices = None
+    if primitive.indices is not None:
+        accessor = gltf.model.accessors[primitive.indices]
+        indices_dtype = 'u2' if accessor.componentType == 5123 else 'u4'
+        indices = _get_from_buffer(primitive.indices, gltf, 1, dtype=indices_dtype)
 
     uvs_idx = mesh_attrs.TEXCOORD_0
     uvs = _get_from_buffer(uvs_idx, gltf, 2) if uvs_idx is not None else None

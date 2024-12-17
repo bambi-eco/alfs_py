@@ -134,6 +134,28 @@ class CtxShot:
             self.tex = self._ctx.texture(*tex_gen_input, dtype='f4')
 
     @property
+    def width(self) -> Optional[int]:
+        """
+        :return: If the shot was initialized using a path and that path was not yet loaded ``None``;
+        Otherwise the texture width.
+        """
+        if self.tex_data is None:
+            return None
+        else:
+            return self.tex_data.width
+
+    @property
+    def height(self) -> Optional[int]:
+        """
+        :return: If the shot was initialized using a path and that path was not yet loaded ``None``;
+        Otherwise the texture height.
+        """
+        if self.tex_data is None:
+            return None
+        else:
+            return self.tex_data.height
+
+    @property
     def img(self) -> Optional[NDArray]:
         """
         :return: If the shot was initialized using a path and that path was not yet loaded ``None``;
