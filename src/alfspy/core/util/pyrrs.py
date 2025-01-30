@@ -1,5 +1,5 @@
 from statistics import fmean
-from typing import Sequence, Collection, Optional
+from typing import Sequence, Collection, Optional, Literal, Union
 
 import numpy as np
 from pyrr import Quaternion, Vector3
@@ -75,3 +75,52 @@ def vector_to_geogebra(vec: Vector3, vec_name: Optional[str] = None, decimals: i
     definition = f'({round(vec.x, decimals)}, {round(vec.y, decimals)}, {round(vec.z, decimals)})'
     assignment = '' if vec_name is None else f'{vec_name} = '
     return assignment + definition
+
+
+EulerOrder = Union[
+    Literal['xyz'], Literal['xzy'],
+    Literal['yxz'], Literal['yzx'],
+    Literal['zxy'], Literal['zyx'],
+]
+
+
+def quaternion_from_eulers(eulers: Sequence[float], order: EulerOrder = 'xyz', dtype: object = None) -> Quaternion:
+    """
+    Converts Euler angles to a Quaternion.
+    :param eulers: The Euler angles to convert.
+    :param order: The Euler order to use (defaults to ``xyz``).
+    :param dtype: The data type to use for the Quaternion (optional). If not specified, it is derived from the Euler
+    angles.
+    :return: The constructed Quaternion.
+    """
+    eulers = np.asarray(eulers)
+
+    if dtype is None:
+        dtype = eulers.dtype
+
+    try:
+        roll, pitch, yaw = eulers[0:3]
+    except ValueError:
+        raise ValueError('Not enough Euler angles to convert')
+
+    qx = Quaternion.from_x_rotation(roll, dtype=dtype)
+    qy = Quaternion.from_y_rotation(pitch, dtype=dtype)
+    qz = Quaternion.from_z_rotation(yaw, dtype=dtype)
+
+    order = order.lower()
+    if order == 'xyz':
+        q = qx * qy * qz
+    elif order == 'xzy':
+        q = qx * qz * qy
+    elif order == 'yxz':
+        q = qy * qx * qz
+    elif order == 'yzx':
+        q = qy * qz * qx
+    elif order == 'zxy':
+        q = qz * qx * qy
+    elif order == 'zyx':
+        q = qz * qy * qx
+    else:
+        raise ValueError(f'Invalid rotation order "{order}"')
+
+    return q
