@@ -10,7 +10,7 @@ import moderngl as mgl
 import numpy as np
 from PIL import Image
 from numpy.typing import NDArray
-from pyrr import Vector3
+from pyrr import Quaternion, Vector3
 
 from alfspy.core.geo.aabb import AABB
 from alfspy.core.geo.transform import Transform
@@ -175,7 +175,7 @@ def read_shots(json_file: str, ctx: mgl.Context, se: BaseSettings) -> list[CtxSh
     return shots[se.initial_skip::se.skip]
 
 
-def make_camera(mesh_aabb: AABB, shots: Sequence[CtxShot], se: BaseSettings) -> Camera:
+def make_camera(mesh_aabb: AABB, shots: Sequence[CtxShot], se: BaseSettings, rotation: Optional[Quaternion] = None) -> Camera:
     """
     Creates a camera. Ensures all render examples create the camera the same way.
     :param mesh_aabb: The AABB of the mesh to render.
@@ -192,7 +192,7 @@ def make_camera(mesh_aabb: AABB, shots: Sequence[CtxShot], se: BaseSettings) -> 
 
     camera_pos = _get_camera_position(se.camera_position_mode, se.camera_dist, mesh_aabb, shots)
     return Camera(fovy=se.fovy, aspect_ratio=se.aspect_ratio, orthogonal=se.orthogonal, orthogonal_size=ortho_size,
-                  position=camera_pos, near=se.near_clipping, far=se.far_clipping)
+                  position=camera_pos, rotation=rotation, near=se.near_clipping, far=se.far_clipping)
 
 
 def read_mask(mask_file: str) -> TextureData:
