@@ -86,7 +86,7 @@ def _cpm_lookup() -> dict[CameraPositioningMode, Callable]:
 
 def _get_camera_position(mode: CameraPositioningMode, camera_dist: float, background_aabb: AABB,
                          shots: Sequence[CtxShot]) -> Vector3:
-    center = _cpm_lookup()[mode](background_aabb, shots)
+    center = _cpm_lookup()[CameraPositioningMode(mode.value)](background_aabb, shots)
     center.z += camera_dist
     return center
 
