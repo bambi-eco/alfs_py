@@ -12,15 +12,15 @@ from alfspy.core.rendering import Resolution, Camera, CtxShot, RenderResultMode
 from pyrr import Quaternion, Vector3
 from trimesh import Trimesh
 
-from alfs_py.src.alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
-from alfs_py.src.alfspy.core.geo.transform import Transform
-from alfs_py.src.alfspy.core.rendering.renderer import Renderer
-from alfs_py.src.alfspy.core.util.collections.cyclic import CyclicList
-from alfs_py.src.alfspy.core.util.geo import get_aabb
-from alfs_py.src.alfspy.core.util.loggings import LoggerStep
-from alfs_py.src.alfspy.core.util.pyrrs import quaternion_from_eulers
-from alfs_py.src.alfspy.render.data import BaseSettings, CameraPositioningMode
-from alfs_py.src.alfspy.render.render import make_camera, make_mgl_context, make_shot_loader, process_render_data, read_gltf, release_all
+from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
+from alfspy.core.geo.transform import Transform
+from alfspy.core.rendering.renderer import Renderer
+from alfspy.core.util.collections.cyclic import CyclicList
+from alfspy.core.util.geo import get_aabb
+from alfspy.core.util.loggings import LoggerStep
+from alfspy.core.util.pyrrs import quaternion_from_eulers
+from alfspy.render.data import BaseSettings, CameraPositioningMode
+from alfspy.render.render import make_camera, make_mgl_context, make_shot_loader, process_render_data, read_gltf, release_all
 
 
 DATASET_DIR = "C:\\Users\\p42748\\Desktop\\bambi_dataset\\test_with_correction_info" #"dataset_dir"
@@ -182,7 +182,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
         # Create new camera for each shot TODO idk if this is needed, i guess every shot has a slightly different camera position, so this is just a try in figuring out what is wrong
         print("shot_rotation_eulers", shot_rotation_eulers)
-        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation=Quaternion.from_eulers([0.0, 0.0, -shot_rotation_eulers[0]])) # shot_rotation_eulers zyx
+        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation=Quaternion.from_eulers([0.0, 0.0, -(shot_rotation_eulers[0] + cor_rotation_eulers[2])])) # shot_rotation_eulers zyx
         print(f'Computed camera position for shot {shot_name}: {single_shot_camera.transform.position}')
 
         # Create new renderer with the single-shot camera
