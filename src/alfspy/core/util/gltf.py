@@ -56,7 +56,7 @@ def gltf_to_mesh_data(gltf: GLTF, transform: Optional[Transform] = None) -> Opti
         accessor = gltf.model.accessors[primitive.indices]
         indices_dtype = 'u2' if accessor.componentType == 5123 else 'u4'
         indices = _get_from_buffer(primitive.indices, gltf, 1, dtype=indices_dtype)
-        indices = np.reshape(indices, (-1, 3))
+        indices = np.reshape(indices, (-1, 3)).astype(np.uint32)
 
     uvs_idx = mesh_attrs.TEXCOORD_0
     uvs = _get_from_buffer(uvs_idx, gltf, 2) if uvs_idx is not None else None
