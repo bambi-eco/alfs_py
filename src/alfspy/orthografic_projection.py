@@ -49,13 +49,11 @@ def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context
 
             # from shot.py _prosses_json() 243-249
             rotation = matched_poses["images"][idx]["rotation"]
-            print("rotation", rotation)
-            rotation = [val-360 if val > 360 else val for val in rotation]
+            rotation = [val % 360.0 for val in rotation]
             
             rot_len = len(rotation)
             if rot_len == 3:
                 eulers = [np.deg2rad(val) for val in rotation]
-                print("eulers", eulers)
                 rotation = quaternion_from_eulers(eulers, 'zyx')
             elif rot_len == 4:
                 rotation = Quaternion(rotation)
@@ -71,6 +69,7 @@ def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context
             shots.append(CtxShot(ctx, os.path.join(images_folder, img_file), position, rotation, fov, 1, correction, lazy))
             shots_rotation_eulers.append(eulers)
             shot_names.append(img_file)
+
     return shots, shot_names, shots_rotation_eulers
 
 
@@ -116,7 +115,7 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str):
     print("processing flight", flight_key)
 
-    frame_files = [f for f in os.listdir(images_folder) if f.startswith(str(flight_key))]
+    frame_files = [f for f in os.listdir(images_folder) if f.split("_")[0] == str(flight_key)]
 
     print(len(frame_files))
 
@@ -146,7 +145,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
     # region config
     input_resolution = Resolution(1024, 1024)
-    render_resolution = Resolution(1024, 1024)
+    render_resolution = Resolution(2048, 2048)
 
     # TODO: check if those settings are correct, 
     # especially camera_dist (seems to change nothing), 
@@ -177,12 +176,14 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
     exit_after_x_shots = 3
     shots_processed = 0
-    # region orthographic projection
+
     for shot, shot_name, shot_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers):
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
-        # Create new camera for each shot TODO idk if this is needed, i guess every shot has a slightly different camera position, so this is just a try in figuring out what is wrong
+
+        # region image projection
+        # Create new camera for each shot
         print("shot_rotation_eulers", shot_rotation_eulers)
-        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation=Quaternion.from_eulers([0.0, 0.0, -(shot_rotation_eulers[0] + cor_rotation_eulers[2])])) # shot_rotation_eulers zyx
+        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation=Quaternion.from_eulers([(shot_rotation_eulers[0] + cor_rotation_eulers[0]), (shot_rotation_eulers[1] + cor_rotation_eulers[1]), (shot_rotation_eulers[2] + cor_rotation_eulers[2])]))
         print(f'Computed camera position for shot {shot_name}: {single_shot_camera.transform.position}')
 
         # Create new renderer with the single-shot camera
@@ -202,7 +203,9 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         
         # Clean up renderer after each shot
         renderer.release()
+        # endregion
 
+        # region label projection
         # project labels (similar to test.py 317-346 )
         print('Start label projection process')
         render = cv2.imread(save_name)
@@ -225,16 +228,12 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                         height = float(values[4])
                         
                         # Convert to pixel coordinates
-                        img_height, img_width = settings.resolution.height, settings.resolution.width
+                        img_height, img_width = input_resolution.height, input_resolution.width
                         x1 = int((x_center - width/2) * img_width)
                         y1 = int((y_center - height/2) * img_height)
                         x2 = int((x_center + width/2) * img_width)
                         y2 = int((y_center + height/2) * img_height)
 
-                        print("x1", x1)
-                        print("y1", y1)
-                        print("x2", x2)
-                        print("y2", y2)
 
                         frame_labels.append(
                                     (class_id, [{"x": x1, "y": y1},
@@ -281,6 +280,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         print('  Saving labeled image')
         labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
         cv2.imwrite(labeled_output_file, render)
+        # endregion
 
         # TODO: remove this
         shots_processed += 1
@@ -308,8 +308,11 @@ def project_images_for_split(split: str):
     flight_keys = get_included_flights(os.path.join(DATASET_DIR, f"export_{split}.json"))
 
     for flight_key in flight_keys:
+        # if flight_key != 56:
+        #     continue
         dem_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_dem.glb")
         poses_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_matched_poses.json")
+
         correction_matrix_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_correction.json")
         
         project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file)
