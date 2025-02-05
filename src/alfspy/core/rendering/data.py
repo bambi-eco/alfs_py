@@ -11,6 +11,7 @@ from pyrr import Matrix44
 
 from alfspy.core.geo import Transform
 
+f4_type = np.dtype('f4')
 
 @dataclass(frozen=True)
 class Resolution:
@@ -185,17 +186,33 @@ class RenderObject:
         ctx = prog.ctx
         vao_content = []
 
-        vertex_buf = ctx.buffer(mesh.vertices.tobytes())
+        vertices = mesh.vertices
+        if vertices.dtype != f4_type:
+            vertices = vertices.astype(f4_type)
+        vertex_buf = ctx.buffer(vertices.tobytes())
         vao_content.append((vertex_buf, '3f4', vert_par))
 
+
         if mesh.uvs is not None:
-            uv_buf = ctx.buffer(mesh.uvs.tobytes())
+            uvs = mesh.uvs
+            if uvs.dtype != f4_type:
+                uvs = uvs.astype(f4_type)
+            uv_buf = ctx.buffer(uvs.tobytes())
             vao_content.append((uv_buf, '2f4', uv_par))
         else:
             uv_buf = None
 
         if mesh.indices is not None:
-            ibo = ctx.buffer(mesh.indices.tobytes())
+            indices = mesh.indices
+
+            if not np.issubdtype(indices.dtype, np.unsignedinteger):
+                raise TypeError(f'Mesh indices must be unsigned integers but are {indices.dtype.name}')
+
+            index_element_size = indices.dtype.itemsize
+            if index_element_size not in (1, 2, 4):
+                raise ValueError('Mesh indices must be either 1, 2, or 4 bytes in size.')
+
+            ibo = ctx.buffer(indices.tobytes())
             vao = ctx.vertex_array(prog, vao_content, index_buffer=ibo, index_element_size=4)
         else:
             ibo = None
