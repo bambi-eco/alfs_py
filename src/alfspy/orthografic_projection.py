@@ -27,6 +27,9 @@ DATASET_DIR = "C:\\Users\\p42748\\Desktop\\bambi_dataset\\test_with_correction_i
 OUTPUT_DIR = "C:\\Users\\p42748\\Desktop\\bambi_dataset\\test_projection"
 SPLITS = ["train", "val", "test"]
 
+# if true, images with labels drawn on them are saved additionally
+SAVE_LABELED_IMAGES = False
+
 LABEL_COLORS = CyclicList((  # BGR
         (102, 0, 255),  # '#ff0066',  #
         (255, 102, 0),  # '#0066ff',  #
@@ -110,7 +113,11 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
     y_center = ((y_min + y_max) / 2) / img_height
     width = (x_max - x_min) / img_width
     height = (y_max - y_min) / img_height
-    
+
+    # check if labels are in the frame, if not return None
+    if x_center + width/2 < 0 or x_center - width/2 > 1 or y_center + height/2 < 0 or y_center - height/2 > 1:
+        return None
+
     return f"{x_center} {y_center} {width} {height}"
 
 
@@ -186,7 +193,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         save_name = os.path.join(output_images_folder, f"{shot_name}")
         renderer.project_shots(
             shot_loader, 
-            RenderResultMode.Complete, 
+            RenderResultMode.ShotOnly, 
             mask=None, 
             integral=False, 
             save=True, 
@@ -261,26 +268,31 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
             poly_lines = [np.array(np_poses).T.reshape((-1, 1, 2))]
 
             axis_aligned_bounding_box = get_axis_aligned_bounding_box(poly_lines)
-            cv2.polylines(render, poly_lines, True, LABEL_COLORS[class_id], thickness=1)
-            cv2.polylines(render, axis_aligned_bounding_box, True, (255, 255, 0), thickness=1)
             labels_axis_aligned.append({'animal_class': class_id, 'axis_aligned_bounding_box': axis_aligned_bounding_box})
 
         # save labels_axis_aligned in a file in the format: animal_class center_x center_y width height
         with open(os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}.txt"), 'w') as f:
             for label in labels_axis_aligned:
-                f.write(f"{label['animal_class']} {to_yolo_format(label['axis_aligned_bounding_box'], settings.resolution.width, settings.resolution.height)}\n")
+                label_str = to_yolo_format(label['axis_aligned_bounding_box'], settings.resolution.width, settings.resolution.height)
+                if label_str is not None:
+                    f.write(f"{label['animal_class']} {label_str}\n")
 
-        print('  Saving labeled image')
-        labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
-        cv2.imwrite(labeled_output_file, render)
+
+        if SAVE_LABELED_IMAGES:
+            cv2.polylines(render, poly_lines, True, LABEL_COLORS[class_id], thickness=1)
+            cv2.polylines(render, axis_aligned_bounding_box, True, (255, 255, 0), thickness=1)
+
+            print('  Saving labeled image')
+            labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
+            cv2.imwrite(labeled_output_file, render)
         # endregion
+
 
         # for testing
         # shots_processed += 1
         # if shots_processed >= exit_after_x_shots:
         #     print("done with shots", shots_processed)
         #     break
-
 
     release_all(ctx, renderer, shots)
 
