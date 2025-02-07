@@ -37,7 +37,7 @@ LABEL_COLORS = CyclicList((  # BGR
     ))
 
 # Get shots for a list of image files
-def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, correction: Transform, matched_poses: dict, cor_rotation_eulers: Vector3, cor_translation: Vector3, lazy: bool = False, fovy: float = 60.0) -> Tuple[List[CtxShot], List[str]]:
+def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, correction: Transform, matched_poses: dict, lazy: bool = False, fovy: float = 60.0) -> Tuple[List[CtxShot], List[str]]:
     shots = []
     shot_names = []
     shots_rotation_eulers = []
@@ -97,6 +97,7 @@ def get_axis_aligned_bounding_box(frame_label) -> List[np.ndarray]:
     
     return [box_coords]  # Return as list with one array to match input format
 
+
 def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, img_height: int) -> str:
     # Extract coordinates from the nested arrays (format of get_axis_aligned_bounding_box return)
     x_min = axis_aligned_bounding_box[0][0][0][0]
@@ -111,6 +112,7 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
     height = (y_max - y_min) / img_height
     
     return f"{x_center} {y_center} {width} {height}"
+
 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str):
     print("processing flight", flight_key)
@@ -147,13 +149,6 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     input_resolution = Resolution(1024, 1024)
     render_resolution = Resolution(2048, 2048)
 
-    # TODO: check if those settings are correct, 
-    # especially camera_dist (seems to change nothing), 
-    # camera_position_mode (not really changing anything relevant), 
-    # fovy (no changes afaict), 
-    # ortho_size (changes a lot but i am not sure if it is relevant), 
-    # correction, 
-    # resolution
     settings = BaseSettings(
         count=len(frame_files), initial_skip=0, add_background=True, camera_dist=10.0,
         camera_position_mode=CameraPositioningMode.FirstShot, fovy=50.0, aspect_ratio=1.0, orthogonal=True,
@@ -169,22 +164,20 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
     ctx = make_mgl_context()
 
-    shots, shot_names, shots_rotation_eulers = get_shots_for_files(frame_files, images_folder, ctx, correction, matched_poses, cor_rotation_eulers, cor_translation)
+    shots, shot_names, shots_rotation_eulers = get_shots_for_files(frame_files, images_folder, ctx, correction, matched_poses)
 
     mesh_aabb = get_aabb(mesh_data.vertices)
     # endregion
 
-    exit_after_x_shots = 3
-    shots_processed = 0
+    # exit_after_x_shots = 3
+    # shots_processed = 0
 
     for shot, shot_name, shot_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers):
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
 
         # region image projection
         # Create new camera for each shot
-        print("shot_rotation_eulers", shot_rotation_eulers)
-        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation=Quaternion.from_eulers([(shot_rotation_eulers[0] + cor_rotation_eulers[0]), (shot_rotation_eulers[1] + cor_rotation_eulers[1]), (shot_rotation_eulers[2] + cor_rotation_eulers[2])]))
-        print(f'Computed camera position for shot {shot_name}: {single_shot_camera.transform.position}')
+        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2])]))     
 
         # Create new renderer with the single-shot camera
         renderer = Renderer(settings.resolution, ctx, single_shot_camera, mesh_data, texture_data)
@@ -247,7 +240,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         fovy = cur_frame_data['fovy'][0]
 
         position = Vector3(cur_frame_data['location'])
-        rotation_eulers = Vector3([np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) + cor_rotation_eulers
+        rotation_eulers = (Vector3([np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) - cor_rotation_eulers) * -1 
 
         position += cor_translation
         rotation = Quaternion.from_eulers(rotation_eulers)
@@ -282,11 +275,12 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         cv2.imwrite(labeled_output_file, render)
         # endregion
 
-        # TODO: remove this
-        shots_processed += 1
-        if shots_processed >= exit_after_x_shots:
-            print("done with shots", shots_processed)
-            break
+        # for testing
+        # shots_processed += 1
+        # if shots_processed >= exit_after_x_shots:
+        #     print("done with shots", shots_processed)
+        #     break
+
 
     release_all(ctx, renderer, shots)
 
@@ -308,16 +302,12 @@ def project_images_for_split(split: str):
     flight_keys = get_included_flights(os.path.join(DATASET_DIR, f"export_{split}.json"))
 
     for flight_key in flight_keys:
-        # if flight_key != 56:
-        #     continue
         dem_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_dem.glb")
         poses_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_matched_poses.json")
 
         correction_matrix_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_correction.json")
         
         project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file)
-
-        #exit()
 
 
 
@@ -342,6 +332,5 @@ if __name__ == "__main__":
         project_images_for_split(split)
         print("done with split", split)
 
-        #exit()
     print("done")
 
