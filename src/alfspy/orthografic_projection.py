@@ -25,9 +25,6 @@ from alfspy.render.render import make_camera, make_mgl_context, make_shot_loader
 import logging
 import sys
 
-# if true, images with labels drawn on them are saved additionally
-SAVE_LABELED_IMAGES = False
-
 LABEL_COLORS = CyclicList((  # BGR
         (102, 0, 255),  # '#ff0066',  #
         (255, 102, 0),  # '#0066ff',  #
@@ -118,12 +115,9 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
 
     return f"{x_center} {y_center} {width} {height}"
 
-
-def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str):
-    print("processing flight", flight_key)
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str,
                               OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
-                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float
+                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool
                               ):
     logging.info(f"processing flight: {flight_key}", )
 
@@ -289,7 +283,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
             cv2.polylines(render, poly_lines, True, LABEL_COLORS[class_id], thickness=1)
             cv2.polylines(render, axis_aligned_bounding_box, True, (255, 255, 0), thickness=1)
 
-            print('  Saving labeled image')
+            logging.info('  Saving labeled image')
             labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
             cv2.imwrite(labeled_output_file, render)
         # endregion
@@ -298,7 +292,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         # for testing
         # shots_processed += 1
         # if shots_processed >= exit_after_x_shots:
-        #     print("done with shots", shots_processed)
+        #     logging.info("done with shots", shots_processed)
         #     break
 
     release_all(ctx, renderer, shots)
@@ -313,7 +307,7 @@ def get_included_flights(json_path):
 
 # Export images for a split (requires the dataset to be in the correct format)
 def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
-                             INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float):
+                             INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool):
     logging.info(f"projecting images for split {split}")
     images_folder = os.path.join(DATASET_DIR, "images", split)
     labels_folder = os.path.join(DATASET_DIR, "labels", split)
@@ -329,13 +323,12 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
         
         project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file,
                                   OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
-                                  INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO)
+                                  INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES)
 
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
-    print("starting orthografic projection")
     logging.info("starting orthografic projection")
     DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\test_with_correction_info"  # "dataset_dir"
     DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\test_projection"
@@ -353,6 +346,7 @@ if __name__ == "__main__":
     ADD_BACKGROUND = bool(int(os.environ.get("ADD_BACKGROUND", 1)))
     FOVY = float(os.environ.get("FOVY", 50.0))
     ASPECT_RATIO = float(os.environ.get("ASPECT_RATIO", 1.0))
+    SAVE_LABELED_IMAGES = bool(int(os.environ.get("SAVE_LABELED_IMAGES", 0)))
 
     logging.info(f"Using configuration: {locals()}")
 
@@ -374,8 +368,8 @@ if __name__ == "__main__":
     # project images for each flight
     for split in SPLITS:
         logging.info(f"starting orthografic projection with split {split}")
-        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO)
+        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES)
         logging.info("done with split", split)
 
-    print("done")
+    logging.info("done")
 

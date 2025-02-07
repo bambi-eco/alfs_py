@@ -41,9 +41,10 @@ Additional (optional) environment variables:
 - RENDER_WIDTH: Render width in pixel (default: 1024)
 - RENDER_HEIGHT:  Render height in pixel (default: 1024)
 - INITIAL_SKIP:  The number of shots read from the Poses JSON file to be skipped from the beginning (default: 0)
-- ADD_BACKGROUND:  Whether to overlay the result over a render of the background object (default: True)
+- ADD_BACKGROUND:  Whether to overlay the result over a render of the background object (default: 1; True)
 - FOVY:  The FOV along the Y-axis when using a perspective camera (default: 50.0)
 - ASPECT_RATIO:  The aspect ratio when using a perspective camera (default: 1.0)
+- SAVE_LABELED_IMAGES: Additional to raw projected images also images with drawn labels are saved (default: 0; False)
 
 ### ALFS based rendering
 
