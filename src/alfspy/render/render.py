@@ -151,12 +151,12 @@ def process_render_data(mesh_data: Optional[MeshData],
     return mesh_data, texture_data
 
 
-def make_mgl_context() -> mgl.Context:
+def make_mgl_context(standalone:bool = True) -> mgl.Context:
     """
     Creates a ModernGL context. Ensures all examples use the same context settings.
     :return: A ModernGL context instance.
     """
-    ctx = mgl.create_context(standalone=True)
+    ctx = mgl.create_context(standalone=standalone)
     ctx.enable(cast(int, mgl.DEPTH_TEST))
     ctx.enable(cast(int, mgl.CULL_FACE))
     ctx.cull_face = 'back'

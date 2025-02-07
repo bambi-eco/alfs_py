@@ -22,10 +22,8 @@ from alfspy.core.util.pyrrs import quaternion_from_eulers
 from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import make_camera, make_mgl_context, make_shot_loader, process_render_data, read_gltf, release_all
 
-
-DATASET_DIR = "C:\\Users\\p42748\\Desktop\\bambi_dataset\\test_with_correction_info" #"dataset_dir"
-OUTPUT_DIR = "C:\\Users\\p42748\\Desktop\\bambi_dataset\\test_projection"
-SPLITS = ["train", "val", "test"]
+import logging
+import sys
 
 # if true, images with labels drawn on them are saved additionally
 SAVE_LABELED_IMAGES = False
@@ -123,10 +121,15 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str):
     print("processing flight", flight_key)
+def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str,
+                              OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
+                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float
+                              ):
+    logging.info(f"processing flight: {flight_key}", )
 
     frame_files = [f for f in os.listdir(images_folder) if f.split("_")[0] == str(flight_key)]
 
-    print(len(frame_files))
+    logging.info(len(frame_files))
 
     output_images_folder = os.path.join(OUTPUT_DIR, 'images', split)
     output_labels_folder = os.path.join(OUTPUT_DIR, 'labels', split)
@@ -154,12 +157,12 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
     # region config
     input_resolution = Resolution(1024, 1024)
-    render_resolution = Resolution(2048, 2048)
+    render_resolution = Resolution(RENDER_WIDTH, RENDER_HEIGHT)
 
     settings = BaseSettings(
-        count=len(frame_files), initial_skip=0, add_background=True, camera_dist=10.0,
-        camera_position_mode=CameraPositioningMode.FirstShot, fovy=50.0, aspect_ratio=1.0, orthogonal=True,
-        ortho_size=(70, 70), correction=correction, resolution=render_resolution
+        count=len(frame_files), initial_skip=INITIAL_SKIP, add_background=ADD_BACKGROUND, camera_dist=CAMERA_DISTANCE,
+        camera_position_mode=CameraPositioningMode.FirstShot, fovy=FOVY, aspect_ratio=ASPECT_RATIO, orthogonal=True,
+        ortho_size=(ORTHO_WIDTH, ORTHO_HEIGHT), correction=correction, resolution=render_resolution
     )
     # endregion
 
@@ -184,7 +187,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
         # region image projection
         # Create new camera for each shot
-        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2])]))     
+        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2])]))
 
         # Create new renderer with the single-shot camera
         renderer = Renderer(settings.resolution, ctx, single_shot_camera, mesh_data, texture_data)
@@ -193,7 +196,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         save_name = os.path.join(output_images_folder, f"{shot_name}")
         renderer.project_shots(
             shot_loader, 
-            RenderResultMode.ShotOnly, 
+            RenderResultMode.ShotOnly,
             mask=None, 
             integral=False, 
             save=True, 
@@ -207,7 +210,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
         # region label projection
         # project labels (similar to test.py 317-346 )
-        print('Start label projection process')
+        logging.info('Start label projection process')
         render = cv2.imread(save_name)
 
         labels_file = os.path.join(labels_folder, shot_name.split('.')[0] + '.txt')
@@ -234,6 +237,10 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                         x2 = int((x_center + width/2) * img_width)
                         y2 = int((y_center + height/2) * img_height)
 
+                        logging.info(f"x1: {x1}")
+                        logging.info(f"y1: {y1}")
+                        logging.info(f"x2: {x2}")
+                        logging.info(f"y2: {y2}")
 
                         frame_labels.append(
                                     (class_id, [{"x": x1, "y": y1},
@@ -247,7 +254,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         fovy = cur_frame_data['fovy'][0]
 
         position = Vector3(cur_frame_data['location'])
-        rotation_eulers = (Vector3([np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) - cor_rotation_eulers) * -1 
+        rotation_eulers = (Vector3([np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) - cor_rotation_eulers) * -1
 
         position += cor_translation
         rotation = Quaternion.from_eulers(rotation_eulers)
@@ -305,8 +312,9 @@ def get_included_flights(json_path):
 
 
 # Export images for a split (requires the dataset to be in the correct format)
-def project_images_for_split(split: str):
-    print("projecting images for split ", split)
+def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
+                             INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float):
+    logging.info(f"projecting images for split {split}")
     images_folder = os.path.join(DATASET_DIR, "images", split)
     labels_folder = os.path.join(DATASET_DIR, "labels", split)
 
@@ -319,11 +327,35 @@ def project_images_for_split(split: str):
 
         correction_matrix_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_correction.json")
         
-        project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file)
+        project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file,
+                                  OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
+                                  INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO)
 
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
+    print("starting orthografic projection")
+    logging.info("starting orthografic projection")
+    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\test_with_correction_info"  # "dataset_dir"
+    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\test_projection"
+
+    # Argument parser can be removed since we're using environment variables
+    SPLITS = os.environ.get("SPLITS", "train,val,test").split(",")
+    OUTPUT_DIR = os.environ.get("OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
+    DATASET_DIR = os.environ.get("INPUT_DIR", DEFAULT_DATASET_DIR)
+    ORTHO_WIDTH = int(os.environ.get("ORTHO_WIDTH", 70))
+    ORTHO_HEIGHT = int(os.environ.get("ORTHO_HEIGHT", 70))
+    RENDER_WIDTH = int(os.environ.get("RENDER_WIDTH", 1024))
+    RENDER_HEIGHT = int(os.environ.get("RENDER_HEIGHT", 1024))
+    CAMERA_DISTANCE = float(os.environ.get("CAMERA_DISTANCE", 10.0))
+    INITIAL_SKIP = int(os.environ.get("INITIAL_SKIP", 0))
+    ADD_BACKGROUND = bool(int(os.environ.get("ADD_BACKGROUND", 1)))
+    FOVY = float(os.environ.get("FOVY", 50.0))
+    ASPECT_RATIO = float(os.environ.get("ASPECT_RATIO", 1.0))
+
+    logging.info(f"Using configuration: {locals()}")
+
     # create output folders if needed
     output_images_folder = os.path.join(OUTPUT_DIR, 'images')
     output_labels_folder = os.path.join(OUTPUT_DIR, 'labels')
@@ -341,8 +373,9 @@ if __name__ == "__main__":
 
     # project images for each flight
     for split in SPLITS:
-        project_images_for_split(split)
-        print("done with split", split)
+        logging.info(f"starting orthografic projection with split {split}")
+        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO)
+        logging.info("done with split", split)
 
     print("done")
 

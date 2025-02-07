@@ -1,0 +1,45 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies for OpenCV
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libx11-dev \
+    libxrandr-dev \
+    libxinerama-dev \
+    libxi-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y xvfb
+
+# Install dependencies
+RUN pip install hatch
+COPY ./requirements.txt /app/requirements.txt
+RUN pip install -r requirements.txt
+
+ENV DISPLAY=:99
+ENV INPUT_DIR=/input
+ENV OUTPUT_DIR=/output
+ENV SPLITS=train,val,test
+ENV CAMERA_DISTANCE=10.0
+ENV ORTHO_WIDTH=70
+ENV ORTHO_HEIGHT=70
+ENV RENDER_WIDTH=1024
+ENV RENDER_HEIGHT=1024
+ENV INITIAL_SKIP=0
+ENV ADD_BACKGROUND=1
+ENV FOVY=50.0
+ENV ASPECT_RATIO=1.0
+
+# Copy everything at once to maintain the project structure
+COPY . /app/
+
+RUN pip install .
+
+
+
+# Run the script
+ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 & sleep 1 && python src/alfspy/orthografic_projection.py"]
