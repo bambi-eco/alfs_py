@@ -11,12 +11,10 @@ A Python-based Viewer for Airborne Light-Field Sampling Data implemented via Mod
 
 ## Docker
 
-There are two docker images that can be used for orthografic and ALFS-based rendering of a dataset created with the BAMBI pipeline.
-
-### Orthografic rendering
+There is a docker image that can be used for orthografic and ALFS-based rendering of a dataset created with the BAMBI pipeline.
 
 ```cli
-docker build --tag orthorender -f Dockerfile_Orthografic .
+docker build --tag orthorender -f Dockerfile .
 ```
 
 CPU only:
@@ -47,7 +45,4 @@ Additional (optional) environment variables:
 - FOVY:  The FOV along the Y-axis when using a perspective camera (default: 50.0)
 - ASPECT_RATIO:  The aspect ratio when using a perspective camera (default: 1.0)
 - SAVE_LABELED_IMAGES: Additional to raw projected images also images with drawn labels are saved (default: 0; False)
-
-### ALFS based rendering
-
-TODO
+- PROJECT_ORTHOGONAL: Flag, which defines if output should be rendered just orthogonal (1) or as light-field (0) (default: 1; True)

@@ -2,8 +2,8 @@ from collections import defaultdict
 import os
 import json
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
-
+from typing import List, Optional, Tuple, Dict
+from pathlib import Path
 import cv2
 from moderngl import Context
 import numpy as np
@@ -35,7 +35,7 @@ LABEL_COLORS = CyclicList((  # BGR
     ))
 
 # Get shots for a list of image files
-def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, correction: Transform, matched_poses: dict, lazy: bool = False, fovy: float = 60.0) -> Tuple[List[CtxShot], List[str]]:
+def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, correction: Transform, matched_poses: dict, lazy: bool = False, fovy: float = 60.0):
     shots = []
     shot_names = []
     shots_rotation_eulers = []
@@ -117,9 +117,23 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str,
                               OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
-                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int
-                              ):
+                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
+                              config: Dict[str, any], project_orthogonal:bool):
     logging.info(f"processing flight: {flight_key}", )
+    nr_of_frames_after_current = 0
+    nr_of_frames_before_current = 0
+
+    for mission_id, mission in config["missions"].items():
+        break_loop = False
+        for flight_id, flight in mission["flights"].items():
+            if flight_key != int(flight_id):
+                continue
+            nr_of_frames_after_current = flight["nr_of_frames_after_current"]
+            nr_of_frames_before_current = flight["nr_of_frames_before_current"]
+            break_loop = True
+        if break_loop:
+            break
+
 
     frame_files = [f for f in os.listdir(images_folder) if f.split("_")[0] == str(flight_key)]
 
@@ -186,17 +200,43 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         # Create new renderer with the single-shot camera
         renderer = Renderer(settings.resolution, ctx, single_shot_camera, mesh_data, texture_data)
         
-        shot_loader = make_shot_loader([shot])  # Create loader for single shot
         save_name = os.path.join(output_images_folder, f"{shot_name}")
-        renderer.project_shots(
-            shot_loader, 
-            RenderResultMode.ShotOnly,
-            mask=None, 
-            integral=False, 
-            save=True, 
-            release_shots=True, 
-            save_name_iter=iter([save_name])
-        )
+        if project_orthogonal:
+            shot_loader = make_shot_loader([shot])  # Create loader for single shot
+            renderer.project_shots(
+                shot_loader,
+                RenderResultMode.ShotOnly,
+                mask=None,
+                integral=False,
+                save=True,
+                release_shots=True,
+                save_name_iter=iter([save_name])
+            )
+        else:
+            previous_frames = []
+            additional_frames = []
+            neighbour_folder = os.path.join(str(Path(images_folder).parent)+"_neighbours", split)
+            for neighbour_frame in os.listdir(neighbour_folder):
+                splits = neighbour_frame.split("_")
+                if splits[0] != str(flight_key):
+                    continue
+                neighbour_id = int(Path(splits[1]).stem)
+                if neighbour_id < frame_idx and neighbour_id >= frame_idx - nr_of_frames_before_current:
+                    previous_frames.append(neighbour_frame)
+
+                if neighbour_id > frame_idx and neighbour_id <= frame_idx + nr_of_frames_after_current:
+                    additional_frames.append(neighbour_frame)
+
+            prev_shots, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, correction, matched_poses)
+            add_shots, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, correction, matched_poses)
+            shot_loader = make_shot_loader(prev_shots + [shot] + add_shots)
+            renderer.render_integral(shot_loader,
+                mask=None,
+                save=True,
+                release_shots=True,
+                save_name=save_name)
+            release_all(prev_shots, add_shots)
+            print()
         
         # Clean up renderer after each shot
         renderer.release()
@@ -298,22 +338,26 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     release_all(ctx, renderer, shots)
 
 
-# Get the included flights from the export json file
-def get_included_flights(json_path):
-    with open(json_path, 'r') as f:
-        data = json.load(f)
-    return data["metadata"]["included_flights"]
-
 
 # Export images for a split (requires the dataset to be in the correct format)
 def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
-                             INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int):
+                             INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
+                             project_orthogonal:bool):
     logging.info(f"projecting images for split {split}")
     images_folder = os.path.join(DATASET_DIR, "images", split)
     labels_folder = os.path.join(DATASET_DIR, "labels", split)
 
+    config_file = os.path.join(DATASET_DIR, f"export_{split}.json")
+
+    if not os.path.exists(config_file):
+        print(f"Could not find config file {config_file}")
+        return
+
+    with open(config_file, 'r') as f:
+        config = json.load(f)
+
     # get all flights in the split
-    flight_keys = get_included_flights(os.path.join(DATASET_DIR, f"export_{split}.json"))
+    flight_keys = config["metadata"]["included_flights"]
 
     for flight_key in flight_keys:
         dem_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_dem.glb")
@@ -323,15 +367,16 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
         
         project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file,
                                   OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
-                                  INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT)
+                                  INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT,
+                                  config, project_orthogonal)
 
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
     logging.info("starting orthografic projection")
-    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\test_with_correction_info"  # "dataset_dir"
-    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\test_projection"
+    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\bambi_dataset"  # "dataset_dir"
+    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\bambi_dataset_projection"
 
     # Argument parser can be removed since we're using environment variables
     SPLITS = os.environ.get("SPLITS", "train,val,test").split(",")
@@ -349,6 +394,7 @@ if __name__ == "__main__":
     FOVY = float(os.environ.get("FOVY", 50.0))
     ASPECT_RATIO = float(os.environ.get("ASPECT_RATIO", 1.0))
     SAVE_LABELED_IMAGES = bool(int(os.environ.get("SAVE_LABELED_IMAGES", 0)))
+    project_orthogonal= bool(int(os.environ.get("PROJECT_ORTHOGONAL", 0)))
 
     logging.info(f"Using configuration: {locals()}")
 
@@ -370,7 +416,7 @@ if __name__ == "__main__":
     # project images for each flight
     for split in SPLITS:
         logging.info(f"starting orthografic projection with split {split}")
-        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT)
+        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal)
         logging.info("done with split", split)
 
     logging.info("done")
