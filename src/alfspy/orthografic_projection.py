@@ -394,7 +394,7 @@ if __name__ == "__main__":
     FOVY = float(os.environ.get("FOVY", 50.0))
     ASPECT_RATIO = float(os.environ.get("ASPECT_RATIO", 1.0))
     SAVE_LABELED_IMAGES = bool(int(os.environ.get("SAVE_LABELED_IMAGES", 0)))
-    project_orthogonal= bool(int(os.environ.get("PROJECT_ORTHOGONAL", 0)))
+    project_orthogonal= bool(int(os.environ.get("PROJECT_ORTHOGONAL", 1)))
 
     logging.info(f"Using configuration: {locals()}")
 
