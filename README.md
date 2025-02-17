@@ -46,3 +46,4 @@ Additional (optional) environment variables:
 - ASPECT_RATIO:  The aspect ratio when using a perspective camera (default: 1.0)
 - SAVE_LABELED_IMAGES: Additional to raw projected images also images with drawn labels are saved (default: 0; False)
 - PROJECT_ORTHOGONAL: Flag, which defines if output should be rendered just orthogonal (1) or as light-field (0) (default: 1; True)
+- ADDITIONAL_ROTATIONS: Additional ortho-projected images with random rotations to be created, only used if PROJECT_ORTHOGONAL is 1 (default: 0)

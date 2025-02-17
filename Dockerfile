@@ -36,6 +36,7 @@ ENV ADD_BACKGROUND=1
 ENV FOVY=50.0
 ENV ASPECT_RATIO=1.0
 ENV SAVE_LABELED_IMAGES=0
+ENV ADDITIONAL_ROTATIONS=0
 
 # Copy everything at once to maintain the project structure
 COPY . /app/

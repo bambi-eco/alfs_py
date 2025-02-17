@@ -118,7 +118,7 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str,
                               OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                               INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
-                              config: Dict[str, any], project_orthogonal:bool):
+                              config: Dict[str, any], project_orthogonal:bool, ADDITIONAL_ROTATIONS: int):
     logging.info(f"processing flight: {flight_key}", )
     nr_of_frames_after_current = 0
     nr_of_frames_before_current = 0
@@ -128,8 +128,10 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         for flight_id, flight in mission["flights"].items():
             if flight_key != int(flight_id):
                 continue
-            nr_of_frames_after_current = flight["nr_of_frames_after_current"]
-            nr_of_frames_before_current = flight["nr_of_frames_before_current"]
+            if "nr_of_frames_after_current" in flight:
+                nr_of_frames_after_current = flight["nr_of_frames_after_current"]
+            if "nr_of_frames_before_current" in flight:
+                nr_of_frames_before_current = flight["nr_of_frames_before_current"]
             break_loop = True
         if break_loop:
             break
@@ -193,147 +195,167 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     for shot, shot_name, shot_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers):
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
 
-        # region image projection
-        # Create new camera for each shot
-        single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2])]))
+        random_z_rotations = [0.0]
+        if ADDITIONAL_ROTATIONS > 0 and project_orthogonal:
+            random_z_rotations.extend(np.random.uniform(0, 2*np.pi, ADDITIONAL_ROTATIONS))
 
-        # Create new renderer with the single-shot camera
-        renderer = Renderer(settings.resolution, ctx, single_shot_camera, mesh_data, texture_data)
-        
-        save_name = os.path.join(output_images_folder, f"{shot_name}")
-        if project_orthogonal:
-            shot_loader = make_shot_loader([shot])  # Create loader for single shot
-            renderer.project_shots(
-                shot_loader,
-                RenderResultMode.ShotOnly,
-                mask=None,
-                integral=False,
-                save=True,
-                release_shots=True,
-                save_name_iter=iter([save_name])
-            )
-        else:
-            previous_frames = []
-            additional_frames = []
-            neighbour_folder = os.path.join(str(Path(images_folder).parent)+"_neighbours", split)
-            for neighbour_frame in os.listdir(neighbour_folder):
-                splits = neighbour_frame.split("_")
-                if splits[0] != str(flight_key):
-                    continue
-                neighbour_id = int(Path(splits[1]).stem)
-                if neighbour_id < frame_idx and neighbour_id >= frame_idx - nr_of_frames_before_current:
-                    previous_frames.append(neighbour_frame)
+        logging.info(random_z_rotations)
 
-                if neighbour_id > frame_idx and neighbour_id <= frame_idx + nr_of_frames_after_current:
-                    additional_frames.append(neighbour_frame)
+        for random_z_rotation in random_z_rotations:	
+            logging.info(f"random_z_rotation: {random_z_rotation}")
+            # region image projection
+            # Create new camera for each shot
+            single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2]) + random_z_rotation]))
+            logging.info(f"single_shot_camera created")
+            # Create new renderer with the single-shot camera
+            renderer = Renderer(settings.resolution, ctx, single_shot_camera, mesh_data, texture_data)
+            logging.info(f"renderer created")
+            if random_z_rotation != 0.0:
+                save_name = os.path.join(output_images_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}.jpg")
+            else:
+                save_name = os.path.join(output_images_folder, f"{shot_name}")
 
-            prev_shots, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, correction, matched_poses)
-            add_shots, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, correction, matched_poses)
-            shot_loader = make_shot_loader(prev_shots + [shot] + add_shots)
-            renderer.render_integral(shot_loader,
-                mask=None,
-                save=True,
-                release_shots=True,
-                save_name=save_name)
-            release_all(prev_shots, add_shots)
-            print()
-        
-        # Clean up renderer after each shot
-        renderer.release()
-        # endregion
+            logging.info(f"saving image to {save_name}")
 
-        # region label projection
-        # project labels (similar to test.py 317-346 )
-        logging.info('Start label projection process')
-        render = cv2.imread(save_name)
+            if project_orthogonal:
+                shot_loader = make_shot_loader([shot])  # Create loader for single shot
+                renderer.project_shots(
+                    shot_loader,
+                    RenderResultMode.ShotOnly,
+                    mask=None,
+                    integral=False,
+                    save=True,
+                    release_shots=True,
+                    save_name_iter=iter([save_name])
+                )
+                logging.info(f"saved image to {save_name}")
+            else:
+                previous_frames = []
+                additional_frames = []
+                neighbour_folder = os.path.join(str(Path(images_folder).parent)+"_neighbours", split)
+                for neighbour_frame in os.listdir(neighbour_folder):
+                    splits = neighbour_frame.split("_")
+                    if splits[0] != str(flight_key):
+                        continue
+                    neighbour_id = int(Path(splits[1]).stem)
+                    if neighbour_id < frame_idx and neighbour_id >= frame_idx - nr_of_frames_before_current:
+                        previous_frames.append(neighbour_frame)
 
-        labels_file = os.path.join(labels_folder, shot_name.split('.')[0] + '.txt')
-        
-        # Read and parse the label file for the current shot/frame idx
-        frame_labels = []
-        if os.path.exists(labels_file):
-            with open(labels_file, 'r') as f:
-                for line in f:
+                    if neighbour_id > frame_idx and neighbour_id <= frame_idx + nr_of_frames_after_current:
+                        additional_frames.append(neighbour_frame)
 
-                    # YOLO format: class x_center y_center width height
-                    values = line.strip().split()
-                    if len(values) == 5:
-                        class_id = int(values[0])
-                        x_center = float(values[1])
-                        y_center = float(values[2])
-                        width = float(values[3])
-                        height = float(values[4])
-                        
-                        # Convert to pixel coordinates
-                        img_height, img_width = input_resolution.height, input_resolution.width
-                        x1 = int((x_center - width/2) * img_width)
-                        y1 = int((y_center - height/2) * img_height)
-                        x2 = int((x_center + width/2) * img_width)
-                        y2 = int((y_center + height/2) * img_height)
+                prev_shots, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, correction, matched_poses)
+                add_shots, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, correction, matched_poses)
+                shot_loader = make_shot_loader(prev_shots + [shot] + add_shots)
+                renderer.render_integral(shot_loader,
+                    mask=None,
+                    save=True,
+                    release_shots=True,
+                    save_name=save_name)
+                release_all(prev_shots, add_shots)
+                print()
+            
+            # Clean up renderer after each shot
+            renderer.release()
+            # endregion
 
-                        logging.info(f"x1: {x1}")
-                        logging.info(f"y1: {y1}")
-                        logging.info(f"x2: {x2}")
-                        logging.info(f"y2: {y2}")
+            # region label projection
+            # project labels (similar to test.py 317-346 )
+            logging.info('Start label projection process')
+            render = cv2.imread(save_name)
 
-                        frame_labels.append(
-                                    (class_id, [{"x": x1, "y": y1},
-                                    {"x": x2, "y": y1},
-                                    {"x": x2, "y": y2},
-                                    {"x": x1, "y": y2}])
-                        )
+            labels_file = os.path.join(labels_folder, shot_name.split('.')[0] + '.txt')
+            
+            # Read and parse the label file for the current shot/frame idx
+            frame_labels = []
+            if os.path.exists(labels_file):
+                with open(labels_file, 'r') as f:
+                    for line in f:
 
-        # get info from matched_poses file
-        cur_frame_data = matched_poses['images'][frame_idx]
-        fovy = cur_frame_data['fovy'][0]
+                        # YOLO format: class x_center y_center width height
+                        values = line.strip().split()
+                        if len(values) == 5:
+                            class_id = int(values[0])
+                            x_center = float(values[1])
+                            y_center = float(values[2])
+                            width = float(values[3])
+                            height = float(values[4])
+                            
+                            # Convert to pixel coordinates
+                            img_height, img_width = input_resolution.height, input_resolution.width
+                            x1 = int((x_center - width/2) * img_width)
+                            y1 = int((y_center - height/2) * img_height)
+                            x2 = int((x_center + width/2) * img_width)
+                            y2 = int((y_center + height/2) * img_height)
 
-        position = Vector3(cur_frame_data['location'])
-        rotation_eulers = (Vector3([np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) - cor_rotation_eulers) * -1
+                            logging.info(f"x1: {x1}")
+                            logging.info(f"y1: {y1}")
+                            logging.info(f"x2: {x2}")
+                            logging.info(f"y2: {y2}")
 
-        position += cor_translation
-        rotation = Quaternion.from_eulers(rotation_eulers)
+                            frame_labels.append(
+                                        (class_id, [{"x": x1, "y": y1},
+                                        {"x": x2, "y": y1},
+                                        {"x": x2, "y": y2},
+                                        {"x": x1, "y": y2}])
+                            )
 
-        camera = Camera(fovy=fovy, aspect_ratio=1.0, position=position, rotation=rotation)
+            # get info from matched_poses file
+            cur_frame_data = matched_poses['images'][frame_idx]
+            fovy = cur_frame_data['fovy'][0]
 
-        labels_axis_aligned = []
-        for class_id, poly_coords in frame_labels:
-            pixel_xs = []
-            pixel_ys = []
-            for pixel in poly_coords:
-                pixel_xs.append(pixel['x'])
-                pixel_ys.append(pixel['y'])
+            position = Vector3(cur_frame_data['location'])
+            rotation_eulers = (Vector3([np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) - cor_rotation_eulers) * -1
 
-            w_poses = pixel_to_world_coord(pixel_xs, pixel_ys, input_resolution.width, input_resolution.height, tri_mesh, camera)
-            np_poses = world_to_pixel_coord(w_poses, render_resolution.width, render_resolution.height, single_shot_camera)
+            position += cor_translation
+            rotation = Quaternion.from_eulers(rotation_eulers)
 
-            poly_lines = [np.array(np_poses).T.reshape((-1, 1, 2))]
+            camera = Camera(fovy=fovy, aspect_ratio=1.0, position=position, rotation=rotation)
 
-            axis_aligned_bounding_box = get_axis_aligned_bounding_box(poly_lines)
-            labels_axis_aligned.append({'animal_class': class_id, 'axis_aligned_bounding_box': axis_aligned_bounding_box})
+            labels_axis_aligned = []
+            for class_id, poly_coords in frame_labels:
+                pixel_xs = []
+                pixel_ys = []
+                for pixel in poly_coords:
+                    pixel_xs.append(pixel['x'])
+                    pixel_ys.append(pixel['y'])
 
-        # save labels_axis_aligned in a file in the format: animal_class center_x center_y width height
-        with open(os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}.txt"), 'w') as f:
-            for label in labels_axis_aligned:
-                label_str = to_yolo_format(label['axis_aligned_bounding_box'], settings.resolution.width, settings.resolution.height)
-                if label_str is not None:
-                    f.write(f"{label['animal_class']} {label_str}\n")
+                w_poses = pixel_to_world_coord(pixel_xs, pixel_ys, input_resolution.width, input_resolution.height, tri_mesh, camera)
+                np_poses = world_to_pixel_coord(w_poses, render_resolution.width, render_resolution.height, single_shot_camera)
+
+                poly_lines = [np.array(np_poses).T.reshape((-1, 1, 2))]
+
+                axis_aligned_bounding_box = get_axis_aligned_bounding_box(poly_lines)
+                labels_axis_aligned.append({'animal_class': class_id, 'axis_aligned_bounding_box': axis_aligned_bounding_box})
+
+            # save labels_axis_aligned in a file in the format: animal_class center_x center_y width height
+            if random_z_rotation != 0.0:
+                labels_save_name = os.path.join(output_images_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}.txt")
+            else:
+                labels_save_name = os.path.join(output_images_folder, f"{shot_name.split('.')[0]}.txt")
+
+            with open(os.path.join(output_labels_folder, labels_save_name), 'w') as f:
+                for label in labels_axis_aligned:
+                    label_str = to_yolo_format(label['axis_aligned_bounding_box'], settings.resolution.width, settings.resolution.height)
+                    if label_str is not None:
+                        f.write(f"{label['animal_class']} {label_str}\n")
 
 
-        if SAVE_LABELED_IMAGES:
-            cv2.polylines(render, poly_lines, True, LABEL_COLORS[class_id], thickness=1)
-            cv2.polylines(render, axis_aligned_bounding_box, True, (255, 255, 0), thickness=1)
+            if SAVE_LABELED_IMAGES:
+                cv2.polylines(render, poly_lines, True, LABEL_COLORS[class_id], thickness=1)
+                cv2.polylines(render, axis_aligned_bounding_box, True, (255, 255, 0), thickness=1)
 
-            logging.info('  Saving labeled image')
-            labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
-            cv2.imwrite(labeled_output_file, render)
-        # endregion
+                logging.info('  Saving labeled image')
+                labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
+                cv2.imwrite(labeled_output_file, render)
+            # endregion
 
 
-        # for testing
-        # shots_processed += 1
-        # if shots_processed >= exit_after_x_shots:
-        #     logging.info("done with shots", shots_processed)
-        #     break
+            # for testing
+            # shots_processed += 1
+            # if shots_processed >= exit_after_x_shots:
+            #     logging.info("done with shots", shots_processed)
+            #     break
 
     release_all(ctx, renderer, shots)
 
@@ -342,7 +364,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 # Export images for a split (requires the dataset to be in the correct format)
 def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
-                             project_orthogonal:bool):
+                             project_orthogonal:bool, ADDITIONAL_ROTATIONS: int):
     logging.info(f"projecting images for split {split}")
     images_folder = os.path.join(DATASET_DIR, "images", split)
     labels_folder = os.path.join(DATASET_DIR, "labels", split)
@@ -368,7 +390,7 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
         project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file,
                                   OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
                                   INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT,
-                                  config, project_orthogonal)
+                                  config, project_orthogonal, ADDITIONAL_ROTATIONS)
 
 
 
@@ -395,6 +417,7 @@ if __name__ == "__main__":
     ASPECT_RATIO = float(os.environ.get("ASPECT_RATIO", 1.0))
     SAVE_LABELED_IMAGES = bool(int(os.environ.get("SAVE_LABELED_IMAGES", 0)))
     project_orthogonal= bool(int(os.environ.get("PROJECT_ORTHOGONAL", 1)))
+    ADDITIONAL_ROTATIONS = int(os.environ.get("ADDITIONAL_ROTATIONS", 0))
 
     logging.info(f"Using configuration: {locals()}")
 
@@ -416,7 +439,7 @@ if __name__ == "__main__":
     # project images for each flight
     for split in SPLITS:
         logging.info(f"starting orthografic projection with split {split}")
-        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal)
+        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal, ADDITIONAL_ROTATIONS)
         logging.info("done with split", split)
 
     logging.info("done")
