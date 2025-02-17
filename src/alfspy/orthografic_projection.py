@@ -201,6 +201,28 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
         logging.info(random_z_rotations)
 
+        prev_shots = []
+        add_shots = []
+
+        if not project_orthogonal:
+            previous_frames = []
+            additional_frames = []
+            neighbour_folder = os.path.join(str(Path(images_folder).parent) + "_neighbours", split)
+            for neighbour_frame in os.listdir(neighbour_folder):
+                splits = neighbour_frame.split("_")
+                if splits[0] != str(flight_key):
+                    continue
+                neighbour_id = int(Path(splits[1]).stem)
+                if frame_idx > neighbour_id >= frame_idx - nr_of_frames_before_current:
+                    previous_frames.append(neighbour_frame)
+
+                if frame_idx < neighbour_id <= frame_idx + nr_of_frames_after_current:
+                    additional_frames.append(neighbour_frame)
+
+            prev_shots, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, correction, matched_poses)
+            add_shots, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, correction, matched_poses)
+
+
         for random_z_rotation in random_z_rotations:	
             logging.info(f"random_z_rotation: {random_z_rotation}")
             # region image projection
@@ -228,31 +250,14 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                     release_shots=False,
                     save_name_iter=iter([save_name])
                 )
-                logging.info(f"saved image to {save_name}")
             else:
-                previous_frames = []
-                additional_frames = []
-                neighbour_folder = os.path.join(str(Path(images_folder).parent)+"_neighbours", split)
-                for neighbour_frame in os.listdir(neighbour_folder):
-                    splits = neighbour_frame.split("_")
-                    if splits[0] != str(flight_key):
-                        continue
-                    neighbour_id = int(Path(splits[1]).stem)
-                    if neighbour_id < frame_idx and neighbour_id >= frame_idx - nr_of_frames_before_current:
-                        previous_frames.append(neighbour_frame)
-
-                    if neighbour_id > frame_idx and neighbour_id <= frame_idx + nr_of_frames_after_current:
-                        additional_frames.append(neighbour_frame)
-
-                prev_shots, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, correction, matched_poses)
-                add_shots, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, correction, matched_poses)
                 shot_loader = make_shot_loader(prev_shots + [shot] + add_shots)
                 renderer.render_integral(shot_loader,
                     mask=None,
                     save=True,
                     release_shots=False,
                     save_name=save_name)
-                release_all(prev_shots, add_shots)
+            logging.info(f"saved image to {save_name}")
             # Clean up renderer after each shot
             renderer.release()
             # endregion
@@ -347,6 +352,9 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                 labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
                 cv2.imwrite(labeled_output_file, render)
             # endregion
+
+        if not project_orthogonal:
+            release_all(prev_shots, add_shots)
         release_all(shot)
 
             # for testing
