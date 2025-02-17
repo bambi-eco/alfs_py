@@ -118,7 +118,7 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str,
                               OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                               INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
-                              config: Dict[str, any], project_orthogonal:bool, ADDITIONAL_ROTATIONS: int):
+                              config: Dict[str, any], project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, rng: np.random.Generator):
     logging.info(f"processing flight: {flight_key}", )
     nr_of_frames_after_current = 0
     nr_of_frames_before_current = 0
@@ -196,8 +196,8 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
 
         random_z_rotations = [0.0]
-        if ADDITIONAL_ROTATIONS > 0 and project_orthogonal:
-            random_z_rotations.extend(np.random.uniform(0, 2*np.pi, ADDITIONAL_ROTATIONS))
+        if ADDITIONAL_ROTATIONS > 0:
+            random_z_rotations.extend(rng.uniform(-ROTATION_LIMIT, ROTATION_LIMIT, ADDITIONAL_ROTATIONS))
 
         logging.info(random_z_rotations)
 
@@ -225,7 +225,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                     mask=None,
                     integral=False,
                     save=True,
-                    release_shots=True,
+                    release_shots=False,
                     save_name_iter=iter([save_name])
                 )
                 logging.info(f"saved image to {save_name}")
@@ -250,11 +250,9 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                 renderer.render_integral(shot_loader,
                     mask=None,
                     save=True,
-                    release_shots=True,
+                    release_shots=False,
                     save_name=save_name)
                 release_all(prev_shots, add_shots)
-                print()
-            
             # Clean up renderer after each shot
             renderer.release()
             # endregion
@@ -349,7 +347,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                 labeled_output_file = os.path.join(output_images_folder, f"labeled_{shot_name}")
                 cv2.imwrite(labeled_output_file, render)
             # endregion
-
+        release_all(shot)
 
             # for testing
             # shots_processed += 1
@@ -364,7 +362,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 # Export images for a split (requires the dataset to be in the correct format)
 def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
-                             project_orthogonal:bool, ADDITIONAL_ROTATIONS: int):
+                             project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, rng: np.random.Generator):
     logging.info(f"projecting images for split {split}")
     images_folder = os.path.join(DATASET_DIR, "images", split)
     labels_folder = os.path.join(DATASET_DIR, "labels", split)
@@ -390,7 +388,7 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
         project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file,
                                   OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
                                   INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT,
-                                  config, project_orthogonal, ADDITIONAL_ROTATIONS)
+                                  config, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, rng)
 
 
 
@@ -418,6 +416,17 @@ if __name__ == "__main__":
     SAVE_LABELED_IMAGES = bool(int(os.environ.get("SAVE_LABELED_IMAGES", 0)))
     project_orthogonal= bool(int(os.environ.get("PROJECT_ORTHOGONAL", 1)))
     ADDITIONAL_ROTATIONS = int(os.environ.get("ADDITIONAL_ROTATIONS", 0))
+    ROTATION_LIMIT = float(os.environ.get("ROTATION_LIMIT", 2*np.pi))
+    ROTATION_SEED = int(os.environ.get("ROTATION_SEED", -1))
+    ROTATION_LIMIT_RADIAN = bool(int(os.environ.get("ROTATION_LIMIT_RADIAN", 1)))
+
+    if not ROTATION_LIMIT_RADIAN:
+        ROTATION_LIMIT = np.deg2rad(ROTATION_LIMIT)
+
+    if ROTATION_SEED < 0:
+        rng = np.random.default_rng()
+    else:
+        rng = np.random.default_rng(ROTATION_SEED)
 
     logging.info(f"Using configuration: {locals()}")
 
@@ -439,7 +448,7 @@ if __name__ == "__main__":
     # project images for each flight
     for split in SPLITS:
         logging.info(f"starting orthografic projection with split {split}")
-        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal, ADDITIONAL_ROTATIONS)
+        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, rng)
         logging.info("done with split", split)
 
     logging.info("done")

@@ -47,3 +47,6 @@ Additional (optional) environment variables:
 - SAVE_LABELED_IMAGES: Additional to raw projected images also images with drawn labels are saved (default: 0; False)
 - PROJECT_ORTHOGONAL: Flag, which defines if output should be rendered just orthogonal (1) or as light-field (0) (default: 1; True)
 - ADDITIONAL_ROTATIONS: Additional ortho-projected images with random rotations to be created, only used if PROJECT_ORTHOGONAL is 1 (default: 0)
+- ROTATION_LIMIT: Define the range of additional rotations between [-Limit, +Limit] (Default: 2 * pi)
+- ROTATION_LIMIT_RADIAN: Define the unit of the set limits as radians (1) or degrees (0) (Default: 1)
+- ROTATION_SEED: Seed used to initialize the randomizer for creating additional rotations (if seed < 0 a random seed is used) (Default: -1)
