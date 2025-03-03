@@ -50,3 +50,4 @@ Additional (optional) environment variables:
 - ROTATION_LIMIT: Define the range of additional rotations between [-Limit, +Limit] (Default: 2 * pi)
 - ROTATION_LIMIT_RADIAN: Define the unit of the set limits as radians (1) or degrees (0) (Default: 1)
 - ROTATION_SEED: Seed used to initialize the randomizer for creating additional rotations (if seed < 0 a random seed is used) (Default: -1)
+- EXCLUDE_FLIGHTS: Sting of comma separated flight keys of flights in the dataset folder that should not be processed (default: "")

@@ -430,22 +430,23 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
     failed_projections_by_flight = {}
 
     for flight_key in flight_keys:
-        dem_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_dem.glb")
-        poses_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_matched_poses.json")
+        if flight_key not in EXCLUDE_FLIGHTS:
+            dem_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_dem.glb")
+            poses_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_matched_poses.json")
 
-        correction_matrix_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_correction.json")
-        if os.path.exists(dem_file) and os.path.exists(poses_file) and os.path.exists(correction_matrix_file):
-            failed_projections = project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file,
-                                  OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
-                                  INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT,
-                                  config, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, rng)
-        else:
-            logging.info(f"skipping flight {flight_key} because of missing files (dem, poses or correction)")
-            failed_projections = defaultdict(int)
-            failed_projections[0] = -1 # -1 means that the flight was skipped
-        
-        if failed_projections:
-            failed_projections_by_flight[flight_key] = failed_projections
+            correction_matrix_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_correction.json")
+            if os.path.exists(dem_file) and os.path.exists(poses_file) and os.path.exists(correction_matrix_file):
+                failed_projections = project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file,
+                                    OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
+                                    INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT,
+                                    config, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, rng)
+            else:
+                logging.info(f"skipping flight {flight_key} because of missing files (dem, poses or correction)")
+                failed_projections = defaultdict(int)
+                failed_projections[0] = -1 # -1 means that the flight was skipped
+            
+            if failed_projections:
+                failed_projections_by_flight[flight_key] = failed_projections
 
     return failed_projections_by_flight
 
@@ -478,6 +479,7 @@ if __name__ == "__main__":
     ROTATION_LIMIT = float(os.environ.get("ROTATION_LIMIT", 2*np.pi))
     ROTATION_SEED = int(os.environ.get("ROTATION_SEED", -1))
     ROTATION_LIMIT_RADIAN = bool(int(os.environ.get("ROTATION_LIMIT_RADIAN", 1)))
+    EXCLUDE_FLIGHTS = set(int(x.strip()) for x in os.environ.get("EXCLUDE_FLIGHTS", "").split(",") if x.strip())
 
     if not ROTATION_LIMIT_RADIAN:
         ROTATION_LIMIT = np.deg2rad(ROTATION_LIMIT)
