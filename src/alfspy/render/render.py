@@ -15,7 +15,7 @@ from pyrr import Quaternion, Vector3
 from alfspy.core.geo.aabb import AABB
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.camera import Camera
-from alfspy.core.rendering.data import TextureData, RenderResultMode, MeshData
+from alfspy.core.rendering.data import TextureData, RenderResultMode, MeshData, Resolution
 from alfspy.core.rendering.renderer import Renderer
 from alfspy.core.rendering.shot import CtxShot
 from alfspy.core.rendering.shot_loader import AsyncShotLoader
@@ -538,3 +538,14 @@ def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
         with LoggerStep(logger, 'Release all resources'):
             release_all(ctx, renderer, shots)
+
+
+if __name__ == '__main__':
+    gltf_file = r"C:\Users\P41743\Desktop\New Folder\dem_mesh_r2.gltf"
+    shot_json_file = r"C:\Users\P41743\Desktop\New folder\Frames_T\matched_poses.json"
+    mask_file = r"C:\Users\P41743\Desktop\New folder\Frames_T\mask_T.png"
+    settings = FocusAnimationSettings(initial_skip=False, add_background=True,
+            camera_dist=30,
+            camera_position_mode=CameraPositioningMode.CenterShot, fovy=50, aspect_ratio=1.0, orthogonal=True,
+            ortho_size=(70, 70), correction=None, resolution=Resolution(2048, 2048))
+    animate_focus(gltf_file, shot_json_file, mask_file)

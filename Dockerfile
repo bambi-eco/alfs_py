@@ -47,7 +47,5 @@ COPY . /app/
 
 RUN pip install .
 
-
-
 # Run the script
-ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 & sleep 1 && python src/alfspy/orthografic_projection.py"]
+ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 2048x2048x32 & sleep 2 && python src/alfspy/orthografic_projection.py"]
