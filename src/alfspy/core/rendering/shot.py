@@ -56,11 +56,11 @@ class CtxShot:
         self._ctx = ctx
         if isinstance(img, str):
             self._img_file = img
+            self.tex_data = None
         else:
             self._img_file = None
             self.tex_data = TextureData(img.copy())
         self.lazy = lazy
-        self.tex_data = None
         self.tex = None
         self._tex_gen_input = None
         if not lazy:

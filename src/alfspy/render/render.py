@@ -541,11 +541,18 @@ def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
 
 if __name__ == '__main__':
+    correction = None
+    gltf_file = r"C:\Users\P41743\Desktop\4_frames\something\dem_mesh_r2.gltf"
+    shot_json_file = r"C:\Users\P41743\Desktop\4_frames\something\t\matched_poses2.json"
+    mask_file = r"C:\Users\P41743\Desktop\4_frames\something\mask_T.png"
+
+    # Transform fucks everything :D
+    correction = None # Transform(Vector3([0.0, 0.0, 0.0]), Quaternion.from_eulers([0.0, 0.0, math.degrees(0.0486946861306418)]))
     gltf_file = r"C:\Users\P41743\Desktop\New Folder\dem_mesh_r2.gltf"
     shot_json_file = r"C:\Users\P41743\Desktop\New folder\Frames_T\matched_poses.json"
     mask_file = r"C:\Users\P41743\Desktop\New folder\Frames_T\mask_T.png"
-    settings = FocusAnimationSettings(initial_skip=False, add_background=True,
-            camera_dist=30,
-            camera_position_mode=CameraPositioningMode.CenterShot, fovy=50, aspect_ratio=1.0, orthogonal=True,
-            ortho_size=(70, 70), correction=None, resolution=Resolution(2048, 2048))
-    animate_focus(gltf_file, shot_json_file, mask_file)
+
+    settings = FocusAnimationSettings(initial_skip=545, add_background=False, frame_count=200, start_focus = 30.0,
+    end_focus = 3.0, camera_dist=30,  camera_position_mode=CameraPositioningMode.FirstShot, fovy=50, aspect_ratio=1.0, orthogonal=True,
+            ortho_size=(20, 20), correction=correction, resolution=Resolution(2048, 2048), count=200)
+    animate_focus(gltf_file, shot_json_file, mask_file, settings)

@@ -41,6 +41,7 @@ ENV ROTATION_LIMIT=6.28318530718
 ENV ROTATION_SEED=-1
 ENV ROTATION_LIMIT_RADIAN=1
 ENV EXCLUDE_FLIGHTS=""
+ENV MERGE_LABELS_IN_ALFS=1
 
 # Copy everything at once to maintain the project structure
 COPY . /app/
@@ -48,4 +49,4 @@ COPY . /app/
 RUN pip install .
 
 # Run the script
-ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 2048x2048x32 & sleep 2 && python src/alfspy/orthografic_projection.py"]
+ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24+32 & sleep 2 && python src/alfspy/orthografic_projection.py"]
