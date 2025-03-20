@@ -565,7 +565,7 @@ if __name__ == "__main__":
     ROTATION_SEED = int(os.environ.get("ROTATION_SEED", -1))
     ROTATION_LIMIT_RADIAN = bool(int(os.environ.get("ROTATION_LIMIT_RADIAN", 1)))
     APPLY_NMS = bool(int(os.environ.get("APPLY_NMS", 1)))
-    NMS_IOU = float(os.environ.get("NMS_IOU", 0.75))
+    NMS_IOU = float(os.environ.get("NMS_IOU", 0.9))
 
     if not ROTATION_LIMIT_RADIAN:
         ROTATION_LIMIT = np.deg2rad(ROTATION_LIMIT)
