@@ -199,7 +199,7 @@ def world_to_pixel_coord(coordinates: Union[ArrayLike, Sequence[ArrayLike]],
 
 def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, mesh: Union[MeshData, Trimesh],
                          camera: Camera, distortion: Optional[Distortion] = None,
-                         camera_matrix: Optional[NDArray] = None) -> Sequence[Optional[ArrayLike]]:
+                         camera_matrix: Optional[NDArray] = None, include_misses: bool = True) -> Sequence[Optional[ArrayLike]]:
     """
     Converts pixel coordinates to 3D world coordinates by projecting them from a camera onto a mesh. The viewport origin
     is assumed to be in the top left corner of the image, with the positive x-axis pointing to the right and the y-axis
@@ -217,6 +217,8 @@ def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, me
     coordinates will be remapped according to counteract the passed distortion.
     :param camera_matrix: The camera matrix to be used for removing distortion (optional). If not specified when a
     distortion is given, an identity matrix will be used.
+    :param include_misses: Whether non-intersecting rays should be included in the result via ``None`` values (default
+    value is ``True``). If set to ``True``, the result indices correspond to the indices of a rays  origin or direction.
     :return: If the given pixel coordinates were invalid or did not result in a hit ``None```; otherwise the 3D world
     coordinates associated with the given pixel.
     """
@@ -259,5 +261,5 @@ def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, me
         # the ray origin is the same as the camera origin
         ray_origins = np.array([camera.transform.position] * count)
 
-    res = cast_ray(ray_origins, ray_dirs, mesh)
+    res = cast_ray(ray_origins, ray_dirs, mesh, include_misses=include_misses)
     return res

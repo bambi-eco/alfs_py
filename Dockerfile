@@ -42,6 +42,8 @@ ENV ROTATION_SEED=-1
 ENV ROTATION_LIMIT_RADIAN=1
 ENV EXCLUDE_FLIGHTS=""
 ENV MERGE_LABELS_IN_ALFS=1
+ENV APPLY_NMS=1
+ENV NMS_IOU=0.75
 
 # Copy everything at once to maintain the project structure
 COPY . /app/
