@@ -178,6 +178,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     mission_id = config["flight_to_mission_mapping"][flight_key_str]
     nr_of_frames_after_current = config["missions"][mission_id]["flights"][flight_key_str]["nr_of_frames_after_current"]
     nr_of_frames_before_current = config["missions"][mission_id]["flights"][flight_key_str]["nr_of_frames_before_current"]
+    neighbor_fps = config["metadata"]["neighbor_frame_fps"]
 
     frame_files = [f for f in os.listdir(images_folder) if f.split("_")[0] == flight_key_str]
 
@@ -260,11 +261,11 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                 if splits[0] != str(flight_key):
                     continue
                 neighbour_id = int(Path(splits[1]).stem)
-                if frame_idx > neighbour_id >= frame_idx - nr_of_frames_before_current:
+                if frame_idx > neighbour_id >= frame_idx - nr_of_frames_before_current and (frame_idx - neighbour_id) % neighbor_fps == 0:
                     previous_frames.append(neighbour_frame)
                     previous_frame_ids.append(neighbour_id)
 
-                if frame_idx < neighbour_id <= frame_idx + nr_of_frames_after_current:
+                if frame_idx < neighbour_id <= frame_idx + nr_of_frames_after_current and (neighbour_id - frame_idx) % neighbor_fps == 0:
                     additional_frames.append(neighbour_frame)
                     additional_frame_ids.append(neighbour_id)
 
@@ -446,11 +447,11 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
             # save labels_axis_aligned in a file in the format: animal_class center_x center_y width height
             if random_z_rotation != 0.0:
-                labels_save_name = os.path.join(output_images_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}.txt")
+                labels_save_name = os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}.txt")
             else:
-                labels_save_name = os.path.join(output_images_folder, f"{shot_name.split('.')[0]}.txt")
+                labels_save_name = os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}.txt")
 
-            with open(os.path.join(output_labels_folder, labels_save_name), 'w') as f:
+            with open(labels_save_name, 'w') as f:
                 for label in labels_axis_aligned:
                     label_str = to_yolo_format(label['axis_aligned_bounding_box'], settings.resolution.width, settings.resolution.height)
                     if label_str is not None:
