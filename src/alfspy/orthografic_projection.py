@@ -241,7 +241,6 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
     for shot, shot_name, shot_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers):
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
-        shot = None
         prev_shots = None
         add_shots = None
         try:
