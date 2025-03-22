@@ -216,6 +216,8 @@ def release_all(*releasables: Union[Releasable, Iterable[Releasable]]) -> None:
 
     rels = []
     for releasable in releasables:
+        if releasable is None:
+            continue
         if isinstance(releasable, Iterable):
             rels.extend(releasable)
         else:

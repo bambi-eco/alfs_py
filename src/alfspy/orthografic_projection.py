@@ -239,6 +239,8 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     # exit_after_x_shots = 3
     # shots_processed = 0
 
+    renderer = None
+
     for shot, shot_name, shot_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers):
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
         prev_shots = None
@@ -249,6 +251,10 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                 random_z_rotations.extend(rng.uniform(-ROTATION_LIMIT, ROTATION_LIMIT, ADDITIONAL_ROTATIONS))
 
             logging.info(random_z_rotations)
+
+            if ADDITIONAL_ROTATIONS == 0 and os.path.exists(os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}.txt")):
+                logging.info("Already exists, skip")
+                continue
 
             prev_shots = []
             add_shots = []
@@ -278,6 +284,10 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
             for random_z_rotation in random_z_rotations:
                 logging.info(f"random_z_rotation: {random_z_rotation}")
+                if ADDITIONAL_ROTATIONS > 0 and os.path.exists(
+                        os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}.txt")):
+                    logging.info("Already exists, skip")
+                    continue
                 # region image projection
                 # Create new camera for each shot
                 single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2]) + random_z_rotation]))
