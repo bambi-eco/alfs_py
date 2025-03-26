@@ -593,7 +593,7 @@ if __name__ == "__main__":
     ROTATION_LIMIT = float(os.environ.get("ROTATION_LIMIT", 2*np.pi))
     ROTATION_SEED = int(os.environ.get("ROTATION_SEED", -1))
     ROTATION_LIMIT_RADIAN = bool(int(os.environ.get("ROTATION_LIMIT_RADIAN", 1)))
-    APPLY_NMS = bool(int(os.environ.get("APPLY_NMS", 1)))
+    APPLY_NMS = bool(int(os.environ.get("APPLY_NMS", 0)))
     NMS_IOU = float(os.environ.get("NMS_IOU", 0.9))
     IS_THERMAL = bool(int(os.environ.get("IS_THERMAL", 1)))
 
