@@ -512,7 +512,10 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
                              project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, merge_labels_in_alfs: bool, APPLY_NMS:bool, NMS_IOU: float, IS_THERMAL:bool, rng: np.random.Generator):
     logging.info(f"projecting images for split {split}")
-    images_folder = os.path.join(DATASET_DIR, "images", split)
+    if IS_THERMAL:
+        images_folder = os.path.join(DATASET_DIR, "images", split)
+    else:
+        images_folder = os.path.join(DATASET_DIR, "rgb_images", split)
     labels_folder = os.path.join(DATASET_DIR, "labels", split)
 
     config_file = os.path.join(DATASET_DIR, f"export_{split}.json")
