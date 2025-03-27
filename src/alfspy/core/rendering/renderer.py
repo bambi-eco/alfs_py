@@ -255,7 +255,7 @@ class Renderer:
 
     def render_integral(self, shots: Union[CtxShot, Iterable[CtxShot]], release_shots: bool = False,
                         mask: Optional[TextureData] = None, save: bool = False,
-                        save_name: Optional[Iterator[str]] = None) -> Optional[NDArray]:
+                        save_name: Optional[Iterator[str]] = None, auto_contrast: bool = True) -> Optional[NDArray]:
         """
         Renders the integral of the given shots on GPU using additive blending. This process will overwrite the current
         blending function and disable the depth test. The image returned will be in the RGBA format.
@@ -264,6 +264,7 @@ class Renderer:
         :param mask: The mask to be applied to each shot texture (optional).
         :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``).
         :param save_name: The file name to be used when saving the result (optional).
+        :param auto_contrast: Whether the result should be automatically contrast adjusted (defaults to ``False``).
         :return: If save is ``True`` ``None``; otherwise the integral of the projected shots.
         """
         if not isinstance(shots, Iterable):
@@ -284,8 +285,14 @@ class Renderer:
         integral_bytes = self._fbo.read(components=4, dtype='f4', clamp=False)
         integral_arr = np.frombuffer(integral_bytes, dtype=np.single).reshape((*self._fbo.size[1::-1], 4))
         alpha = integral_arr[:, :, -1][:, :, np.newaxis]
-        alpha_mask = (alpha > 0.0)
+        alpha_mask = (alpha > 0.1) # alpha contains full numbers
         out = np.divide(integral_arr, alpha, where=alpha_mask)
+        if auto_contrast:
+            mask_rgba = np.broadcast_to(alpha_mask, out.shape).copy()
+            mask_rgba[:,:,-1] = False # set alpha to 0
+            min_val = np.min(out[mask_rgba])
+            max_val = np.max(out[mask_rgba])
+            out[mask_rgba] = (out[mask_rgba] - min_val) / (max_val - min_val)
         result = (out * 255).astype(np.uint8)[::-1, ...]
 
         self._ctx.disable(cast(int, mgl.BLEND))
@@ -392,7 +399,7 @@ class Renderer:
         }} else {{
             f_out_v4_color = vec4(texture({_PAR_TEX}, uv.xy).rgba);
             if ({_PAR_MASK_FLAG} > 0.0) {{
-                f_out_v4_color.a *= texture({_PAR_MASK}, uv.xy).r;
+                f_out_v4_color.rgba *= texture({_PAR_MASK}, uv.xy).r;
             }}
         }}
     }}
