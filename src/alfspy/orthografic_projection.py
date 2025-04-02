@@ -336,6 +336,11 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                 logging.info('Start label projection process')
                 render = cv2.imread(save_name)
 
+                # save labels_axis_aligned in a file in the format: animal_class center_x center_y width height
+                if random_z_rotation != 0.0:
+                    labels_save_name = os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}")
+                else:
+                    labels_save_name = os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}")
 
                 # Read and parse the label file for the current shot/frame idx
                 frame_labels = []
@@ -422,20 +427,30 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                                 projected_labels[additional_frame_label["track"]] = []
                             projected_labels[additional_frame_label["track"]].append({'animal_class': class_id, 'axis_aligned_bounding_box': axis_aligned_bounding_box})
 
+
+                    to_write = {}
                     # calculate minimal bounding box around all bounding boxes of a track in the scene
                     for track_id, label_states in projected_labels.items():
-                        bboxes = np.array([label_state["axis_aligned_bounding_box"] for label_state in label_states])
-                        bboxes = bboxes.reshape(-1, 2)
+                        animal_class = label_states[0]["animal_class"]
+
+                        all_bboxes = [np.array(label_state["axis_aligned_bounding_box"]).reshape(-1, 2).tolist() for label_state in label_states]
+                        bboxes = np.array(all_bboxes).reshape(-1, 2)
                         x_min, y_min = bboxes.min(axis=0)
                         x_max, y_max = bboxes.max(axis=0)
-                        enclosing_bbox = [np.array([
+                        enclosing_bbox = np.array([
                             [[x_min, y_min]],
                             [[x_max, y_min]],
                             [[x_max, y_max]],
                             [[x_min, y_max]]
-                        ])]
-                        labels_axis_aligned.append({'animal_class': label_states[0]["animal_class"], 'axis_aligned_bounding_box': enclosing_bbox})
+                        ])
 
+                        to_write[track_id] = {
+                            "animal_class": animal_class,
+                            'axis_aligned_bbs': all_bboxes
+                        }
+                        labels_axis_aligned.append({'animal_class': animal_class, 'axis_aligned_bounding_box': [enclosing_bbox]})
+                    with open(labels_save_name + ".json", 'w') as f:
+                        json.dump(to_write, f)
                 if APPLY_NMS:
                     boxes = []
                     for box_dict in labels_axis_aligned:
@@ -464,13 +479,9 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                         filtered_boxes.append(labels_axis_aligned[i])
                     labels_axis_aligned = filtered_boxes
 
-                # save labels_axis_aligned in a file in the format: animal_class center_x center_y width height
-                if random_z_rotation != 0.0:
-                    labels_save_name = os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}.txt")
-                else:
-                    labels_save_name = os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}.txt")
 
-                with open(labels_save_name, 'w') as f:
+
+                with open(labels_save_name+".txt", 'w') as f:
                     for label in labels_axis_aligned:
                         label_str = to_yolo_format(label['axis_aligned_bounding_box'], settings.resolution.width, settings.resolution.height)
                         if label_str is not None:
@@ -571,8 +582,8 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
     logging.info("starting orthografic projection")
-    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\bambi_dataset"  # "dataset_dir"
-    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\bambi_dataset\projected"
+    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\bambi_dataset2\data"  # "dataset_dir"
+    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\bambi_dataset2\bambi_dataset_projection"
 
     # Argument parser can be removed since we're using environment variables
     SPLITS = os.environ.get("SPLITS", "train,val,test").split(",")
@@ -590,7 +601,7 @@ if __name__ == "__main__":
     FOVY = float(os.environ.get("FOVY", 50.0))
     ASPECT_RATIO = float(os.environ.get("ASPECT_RATIO", 1.0))
     SAVE_LABELED_IMAGES = bool(int(os.environ.get("SAVE_LABELED_IMAGES", 0)))
-    project_orthogonal= bool(int(os.environ.get("PROJECT_ORTHOGONAL", 1)))
+    project_orthogonal= False
     merge_labels_in_alfs = bool(int(os.environ.get("MERGE_LABELS_IN_ALFS", 1)))
     ADDITIONAL_ROTATIONS = int(os.environ.get("ADDITIONAL_ROTATIONS", 0))
     ROTATION_LIMIT = float(os.environ.get("ROTATION_LIMIT", 2*np.pi))
