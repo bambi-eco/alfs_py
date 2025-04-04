@@ -40,9 +40,9 @@ def polyline_to_bounding_box(polyline: List[int]) -> Tuple[int, int, int, int]:
     ys = []
     for coordinate_idx, coordinate in enumerate(polyline):
         if coordinate_idx % 2 == 0:
-            xs.append(int(coordinate))
+            xs.append(int(float(coordinate)))
         else:
-            ys.append(int(coordinate))
+            ys.append(int(float(coordinate)))
 
     start_x = min(xs)
     start_y = min(ys)
@@ -158,9 +158,9 @@ def project_label(label_coordinates, input_resolution, tri_mesh, camera, render_
     pixel_ys = []
     for pixel_id, pixel in enumerate(label_coordinates):
         if pixel_id % 2 == 0:
-            pixel_xs.append(int(pixel))
+            pixel_xs.append(int(float(pixel)))
         else:
-            pixel_ys.append(int(pixel))
+            pixel_ys.append(int(float(pixel)))
 
     w_poses = pixel_to_world_coord(pixel_xs, pixel_ys, input_resolution.width, input_resolution.height, tri_mesh, camera,
                                    include_misses=False)
