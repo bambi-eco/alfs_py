@@ -11,6 +11,10 @@ A Python-based Viewer for Airborne Light-Field Sampling Data implemented via Mod
 
 ## Docker
 
+> [!IMPORTANT]
+> Important note: The docker image is based on Xvfb. With light field renderings we had the experience, that some virtual buffers are not corretlcy cleaned in this setup with ModernGL which sometimes leads to artifacts. In such cases we recommend to run it on-premise.
+> With just orthografical projections we didn't have this experience so far, so maybe some kind of transparency issue.
+
 There is a docker image that can be used for orthografic and ALFS-based rendering of a dataset created with the BAMBI pipeline.
 
 ```cli
