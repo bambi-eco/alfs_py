@@ -169,11 +169,29 @@ def project_label(label_coordinates, input_resolution, tri_mesh, camera, render_
     return [np.array(np_poses).T.reshape((-1, 1, 2))]
 
 
+def get_frame_correction(corrections_data: dict, flight_key: str, frame_idx: int) -> Optional[dict]:
+    """
+    Get the correction for a specific frame from the corrections data.
+    Returns None if no correction is found for the frame or if tz/rz are null.
+    """
+    if str(flight_key) not in corrections_data.get("corrections", {}):
+        return None
+        
+    for correction in corrections_data["corrections"][str(flight_key)]:
+        if correction["start frame"] <= frame_idx <= correction["end frame"]:
+            if correction["rz"] is None or correction["tz"] is None:
+                return None
+            return {
+                "rotation": {"x": 0.0, "y": 0.0, "z": correction["rz"]},
+                "translation": {"x": 0.0, "y": 0.0, "z": correction["tz"]}
+            }
+    return None
+
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str, mask_file: str,
                               OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                               INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
                               config: Dict[str, any], project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, merge_labels_in_alfs: bool,
-                              APPLY_NMS:bool, NMS_IOU: float, rng: np.random.Generator):
+                              APPLY_NMS:bool, NMS_IOU: float, rng: np.random.Generator, use_onefile_corrections: bool = False, onefile_corrections_file: Optional[str] = None):
     logging.info(f"processing flight: {flight_key}", )
     flight_key_str = str(flight_key)
     mission_id = config["flight_to_mission_mapping"][flight_key_str]
@@ -197,10 +215,28 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         print(f"Mask file not available: {mask_file}")
         mask = None
 
-    with open(correction_matrix_file, 'r') as file:
-        correction = json.load(file)
+    # Load corrections data
+    corrections_data = None
+    if use_onefile_corrections and onefile_corrections_file:
+        with open(onefile_corrections_file, 'r') as file:
+            corrections_data = json.load(file)
 
-    # from test.py 248-258
+    with open(poses_file, 'r') as file:
+        matched_poses = json.load(file)
+
+    # region config
+    input_resolution = Resolution(INPUT_WIDTH, INPUT_HEIGHT)
+    render_resolution = Resolution(RENDER_WIDTH, RENDER_HEIGHT)
+
+    # Default correction (will be updated per frame if using unified corrections)
+    if not use_onefile_corrections:
+        logging.info(f"using correction matrix file: {correction_matrix_file}")
+        with open(correction_matrix_file, 'r') as file:
+            correction = json.load(file)
+    else:
+        logging.info(f"using unified corrections file: {onefile_corrections_file}")
+        correction = None
+
     if correction is not None:
         translation = correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
         cor_translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
@@ -213,15 +249,6 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         cor_rotation_eulers = Vector3()
         correction = Transform()
 
-    with open(poses_file, 'r') as file:
-        matched_poses = json.load(file)
-
-    # endregion
-
-    # region config
-    input_resolution = Resolution(INPUT_WIDTH, INPUT_HEIGHT)
-    render_resolution = Resolution(RENDER_WIDTH, RENDER_HEIGHT)
-
     settings = BaseSettings(
         count=len(frame_files), initial_skip=INITIAL_SKIP, add_background=ADD_BACKGROUND, camera_dist=CAMERA_DISTANCE,
         camera_position_mode=CameraPositioningMode.FirstShot, fovy=FOVY, aspect_ratio=ASPECT_RATIO, orthogonal=True,
@@ -230,7 +257,6 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     # endregion
 
     # region setup
-    # basically render.py _base_steps() with the cange of using the files form the folder and not the poses file
     mesh_data, texture_data = read_gltf(dem_file)
     tri_mesh = Trimesh(vertices=mesh_data.vertices, faces=mesh_data.indices)
     mesh_data, texture_data = process_render_data(mesh_data, texture_data)
@@ -242,9 +268,6 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     mesh_aabb = get_aabb(mesh_data.vertices)
     # endregion
 
-    # exit_after_x_shots = 3
-    # shots_processed = 0
-
     renderer = None
 
     for shot, shot_name, shot_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers):
@@ -252,6 +275,18 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         prev_shots = None
         add_shots = None
         try:
+            # Get frame-specific correction if using unified corrections
+            if use_onefile_corrections and corrections_data:
+                frame_correction = get_frame_correction(corrections_data, flight_key_str, frame_idx)
+                if frame_correction:
+                    translation = frame_correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
+                    cor_translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
+
+                    rotation = frame_correction.get('rotation', {'x': 0, 'y': 0, 'z': 0})
+                    cor_rotation_eulers = Vector3([rotation['x'], rotation['y'], rotation['z']], dtype='f4')
+                    correction = Transform(cor_translation, Quaternion.from_eulers(cor_rotation_eulers))
+                    settings.correction = correction
+
             random_z_rotations = [0.0]
             if ADDITIONAL_ROTATIONS > 0:
                 random_z_rotations.extend(rng.uniform(-ROTATION_LIMIT, ROTATION_LIMIT, ADDITIONAL_ROTATIONS))
@@ -521,7 +556,8 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 # Export images for a split (requires the dataset to be in the correct format)
 def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
-                             project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, merge_labels_in_alfs: bool, APPLY_NMS:bool, NMS_IOU: float, IS_THERMAL:bool, rng: np.random.Generator):
+                             project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, merge_labels_in_alfs: bool, APPLY_NMS:bool, NMS_IOU: float, IS_THERMAL:bool, rng: np.random.Generator,
+                             use_onefile_corrections: bool = False, onefile_corrections_file: Optional[str] = None):
     logging.info(f"projecting images for split {split}")
     if IS_THERMAL:
         images_folder = os.path.join(DATASET_DIR, "images", split)
@@ -561,7 +597,6 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
         label_backward_mapping[wikidata_id] = label_id
     config["metadata"]["label_backward_mapping"] = label_backward_mapping
 
-
     for flight_key in flight_keys:
         dem_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_dem.glb")
         poses_file = os.path.join(DATASET_DIR, "correction_data", f"{flight_key}_matched_poses.json")
@@ -575,7 +610,8 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
         project_images_for_flight(flight_key, split, images_folder, labels_folder, dem_file, poses_file, correction_matrix_file, mask_file,
                                   OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
                                   INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT,
-                                  config, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, merge_labels_in_alfs, APPLY_NMS, NMS_IOU, rng)
+                                  config, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, merge_labels_in_alfs, APPLY_NMS, NMS_IOU, rng,
+                                  use_onefile_corrections, onefile_corrections_file)
 
 
 
@@ -610,6 +646,8 @@ if __name__ == "__main__":
     APPLY_NMS = bool(int(os.environ.get("APPLY_NMS", 0)))
     NMS_IOU = float(os.environ.get("NMS_IOU", 0.9))
     IS_THERMAL = bool(int(os.environ.get("IS_THERMAL", 1)))
+    USE_ONEFILE_CORRECTIONS = bool(int(os.environ.get("USE_ONEFILE_CORRECTIONS", 1)))
+    ONEFILE_CORRECTIONS_FILE = os.path.join(DATASET_DIR, "corrections.json")
 
     if not ROTATION_LIMIT_RADIAN:
         ROTATION_LIMIT = np.deg2rad(ROTATION_LIMIT)
@@ -639,7 +677,7 @@ if __name__ == "__main__":
     # project images for each flight
     for split in SPLITS:
         logging.info(f"starting orthografic projection with split {split}")
-        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, merge_labels_in_alfs, APPLY_NMS, NMS_IOU, IS_THERMAL, rng)
+        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, merge_labels_in_alfs, APPLY_NMS, NMS_IOU, IS_THERMAL, rng, USE_ONEFILE_CORRECTIONS, ONEFILE_CORRECTIONS_FILE)
         logging.info("done with split", split)
 
     logging.info("done")

@@ -45,6 +45,7 @@ ENV MERGE_LABELS_IN_ALFS=1
 ENV APPLY_NMS=0
 ENV NMS_IOU=0.9
 ENV IS_THERMAL=1
+ENV USE_ONEFILE_CORRECTIONS=1
 
 # Copy everything at once to maintain the project structure
 COPY . /app/
