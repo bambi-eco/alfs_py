@@ -59,28 +59,30 @@ def polyline_to_bounding_box(polyline: List[int]) -> Tuple[int, int, int, int]:
 #         label["label_id"] = label_id
 
 # Get shots for a list of image files
-def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, correction: Transform, matched_poses: dict, lazy: bool = False, fovy: float = 60.0):
+def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, corrections_data: Dict[str, any], matched_poses: dict, lazy: bool = False, fovy: float = 60.0):
     shots = []
     shot_names = []
     shots_rotation_eulers = []
+    corrections = []
+    correction_eulers = []
     for img_file in image_files:
         if img_file.endswith(".png") or img_file.endswith(".jpg"):
             idx = int(img_file.split("_")[1].split(".")[0])
 
-            position = Vector3(matched_poses["images"][idx]["location"])
+            camera_position = Vector3(matched_poses["images"][idx]["location"])
 
             # from shot.py _prosses_json() 243-249
-            rotation = matched_poses["images"][idx]["rotation"]
-            rotation = [val % 360.0 for val in rotation]
-            
-            rot_len = len(rotation)
+            camera_rotation = matched_poses["images"][idx]["rotation"]
+            camera_rotation = [val % 360.0 for val in camera_rotation]
+
+            rot_len = len(camera_rotation)
             if rot_len == 3:
-                eulers = [np.deg2rad(val) for val in rotation]
-                rotation = quaternion_from_eulers(eulers, 'zyx')
+                eulers = [np.deg2rad(val) for val in camera_rotation]
+                camera_rotation = quaternion_from_eulers(eulers, 'zyx')
             elif rot_len == 4:
-                rotation = Quaternion(rotation)
+                camera_rotation = Quaternion(camera_rotation)
             else:
-                raise ValueError(f'Invalid rotation format of length {rot_len}: {rotation}')
+                raise ValueError(f'Invalid rotation format of length {rot_len}: {camera_rotation}')
             
             fov = matched_poses["images"][idx]["fovy"][0]
             if fov is None:
@@ -88,11 +90,22 @@ def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context
             elif isinstance(fov, list):
                 fov = fov[0]
 
-            shots.append(CtxShot(ctx, os.path.join(images_folder, img_file), position, rotation, fov, 1, correction, lazy))
-            shots_rotation_eulers.append(eulers)
-            shot_names.append(img_file)
+            frame_correction = get_frame_correction(corrections_data, idx)
+            translation = frame_correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
+            cor_translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
 
-    return shots, shot_names, shots_rotation_eulers
+            rotation = frame_correction.get('rotation', {'x': 0, 'y': 0, 'z': 0})
+            cor_rotation_eulers = Vector3([rotation['x'], rotation['y'], rotation['z']], dtype='f4')
+            cor_quat = Quaternion.from_eulers(cor_rotation_eulers)
+            correction = Transform(cor_translation, cor_quat)
+
+            shots.append(CtxShot(ctx, os.path.join(images_folder, img_file), camera_position, camera_rotation, fov, 1, correction, lazy))
+            shots_rotation_eulers.append(cor_rotation_eulers)
+            shot_names.append(img_file)
+            corrections.append(correction)
+            correction_eulers.append(cor_rotation_eulers)
+
+    return shots, shot_names, shots_rotation_eulers, corrections, correction_eulers
 
 
 def get_axis_aligned_bounding_box(frame_label) -> List[np.ndarray]:
@@ -169,23 +182,15 @@ def project_label(label_coordinates, input_resolution, tri_mesh, camera, render_
     return [np.array(np_poses).T.reshape((-1, 1, 2))]
 
 
-def get_frame_correction(corrections_data: dict, flight_key: str, frame_idx: int) -> Optional[dict]:
+def get_frame_correction(corrections_data: dict, frame_idx: int) -> Optional[dict]:
     """
     Get the correction for a specific frame from the corrections data.
     Returns None if no correction is found for the frame or if tz/rz are null.
     """
-    if str(flight_key) not in corrections_data.get("corrections", {}):
-        return None
-        
-    for correction in corrections_data["corrections"][str(flight_key)]:
+    for correction in corrections_data["corrections"]:
         if correction["start frame"] <= frame_idx <= correction["end frame"]:
-            if correction["rz"] is None or correction["tz"] is None:
-                return None
-            return {
-                "rotation": {"x": 0.0, "y": 0.0, "z": correction["rz"]},
-                "translation": {"x": 0.0, "y": 0.0, "z": correction["tz"]}
-            }
-    return None
+            return correction
+    return corrections_data["default"]
 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str, mask_file: str,
                               OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
@@ -216,10 +221,15 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
         mask = None
 
     # Load corrections data
-    corrections_data = None
+    corrections_data = {}
     if use_onefile_corrections and onefile_corrections_file:
         with open(onefile_corrections_file, 'r') as file:
-            corrections_data = json.load(file)
+            flight_corrections_data = json.load(file)
+            flight_correction = flight_corrections_data["corrections"].get(flight_key_str)
+            if flight_correction is not None:
+                corrections_data["corrections"] = flight_correction
+            else:
+                corrections_data["corrections"] = []
 
     with open(poses_file, 'r') as file:
         matched_poses = json.load(file)
@@ -229,31 +239,10 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     render_resolution = Resolution(RENDER_WIDTH, RENDER_HEIGHT)
 
     # Default correction (will be updated per frame if using unified corrections)
-    if not use_onefile_corrections:
-        logging.info(f"using correction matrix file: {correction_matrix_file}")
-        with open(correction_matrix_file, 'r') as file:
-            correction = json.load(file)
-    else:
-        logging.info(f"using unified corrections file: {onefile_corrections_file}")
-        correction = None
-
-    if correction is not None:
-        translation = correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
-        cor_translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
-
-        rotation = correction.get('rotation', {'x': 0, 'y': 0, 'z': 0})
-        cor_rotation_eulers = Vector3([rotation['x'], rotation['y'], rotation['z']], dtype='f4')
-        correction = Transform(cor_translation, Quaternion.from_eulers(cor_rotation_eulers))
-    else:
-        cor_translation = Vector3()
-        cor_rotation_eulers = Vector3()
-        correction = Transform()
-
-    settings = BaseSettings(
-        count=len(frame_files), initial_skip=INITIAL_SKIP, add_background=ADD_BACKGROUND, camera_dist=CAMERA_DISTANCE,
-        camera_position_mode=CameraPositioningMode.FirstShot, fovy=FOVY, aspect_ratio=ASPECT_RATIO, orthogonal=True,
-        ortho_size=(ORTHO_WIDTH, ORTHO_HEIGHT), correction=correction, resolution=render_resolution
-    )
+    logging.info(f"using correction matrix file: {correction_matrix_file}")
+    with open(correction_matrix_file, 'r') as file:
+        correction = json.load(file)
+        corrections_data["default"] = correction
     # endregion
 
     # region setup
@@ -263,30 +252,25 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 
     ctx = make_mgl_context()
 
-    shots, shot_names, shots_rotation_eulers = get_shots_for_files(frame_files, images_folder, ctx, correction, matched_poses)
+    shots, shot_names, shots_rotation_eulers, corrections, correction_eulers = get_shots_for_files(frame_files, images_folder, ctx, corrections_data, matched_poses)
 
     mesh_aabb = get_aabb(mesh_data.vertices)
     # endregion
 
     renderer = None
 
-    for shot, shot_name, shot_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers):
+    for shot, shot_name, shot_rotation_eulers, correction, cor_rotation_eulers in zip(shots, shot_names, shots_rotation_eulers, corrections, correction_eulers):
+        settings = BaseSettings(
+            count=len(frame_files), initial_skip=INITIAL_SKIP, add_background=ADD_BACKGROUND,
+            camera_dist=CAMERA_DISTANCE,
+            camera_position_mode=CameraPositioningMode.FirstShot, fovy=FOVY, aspect_ratio=ASPECT_RATIO, orthogonal=True,
+            ortho_size=(ORTHO_WIDTH, ORTHO_HEIGHT), correction=correction, resolution=render_resolution
+        )
+        cor_translation = correction.position
         frame_idx = int(shot_name.split("_")[1].split(".")[0])
         prev_shots = None
         add_shots = None
         try:
-            # Get frame-specific correction if using unified corrections
-            if use_onefile_corrections and corrections_data:
-                frame_correction = get_frame_correction(corrections_data, flight_key_str, frame_idx)
-                if frame_correction:
-                    translation = frame_correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
-                    cor_translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
-
-                    rotation = frame_correction.get('rotation', {'x': 0, 'y': 0, 'z': 0})
-                    cor_rotation_eulers = Vector3([rotation['x'], rotation['y'], rotation['z']], dtype='f4')
-                    correction = Transform(cor_translation, Quaternion.from_eulers(cor_rotation_eulers))
-                    settings.correction = correction
-
             random_z_rotations = [0.0]
             if ADDITIONAL_ROTATIONS > 0:
                 random_z_rotations.extend(rng.uniform(-ROTATION_LIMIT, ROTATION_LIMIT, ADDITIONAL_ROTATIONS))
@@ -319,8 +303,8 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                         additional_frames.append(neighbour_frame)
                         additional_frame_ids.append(neighbour_id)
 
-                prev_shots, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, correction, matched_poses)
-                add_shots, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, correction, matched_poses)
+                prev_shots, _, _, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, corrections_data, matched_poses)
+                add_shots, _, _, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, corrections_data, matched_poses)
 
 
             for random_z_rotation in random_z_rotations:
@@ -618,11 +602,11 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
     logging.info("starting orthografic projection")
-    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\bambi_dataset2\data"  # "dataset_dir"
-    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\bambi_dataset2\bambi_dataset_projection"
+    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\178"  # "dataset_dir"
+    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\178\bambi_dataset_projection"
 
     # Argument parser can be removed since we're using environment variables
-    SPLITS = os.environ.get("SPLITS", "train,val,test").split(",")
+    SPLITS = os.environ.get("SPLITS", "val").split(",")
     OUTPUT_DIR = os.environ.get("OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
     DATASET_DIR = os.environ.get("INPUT_DIR", DEFAULT_DATASET_DIR)
     ORTHO_WIDTH = int(os.environ.get("ORTHO_WIDTH", 70))
