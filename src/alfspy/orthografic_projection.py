@@ -59,7 +59,7 @@ def polyline_to_bounding_box(polyline: List[int]) -> Tuple[int, int, int, int]:
 #         label["label_id"] = label_id
 
 # Get shots for a list of image files
-def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, corrections_data: Dict[str, any], matched_poses: dict, lazy: bool = False, fovy: float = 60.0):
+def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, corrections_data: Dict[str, any], matched_poses: dict, lazy: bool = False, fovy: float = 60.0, central_frame_idx: Optional[int] = None):
     shots = []
     shot_names = []
     shots_rotation_eulers = []
@@ -90,7 +90,7 @@ def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context
             elif isinstance(fov, list):
                 fov = fov[0]
 
-            frame_correction = get_frame_correction(corrections_data, idx)
+            frame_correction = get_frame_correction(corrections_data, idx, central_frame_idx)
             translation = frame_correction.get('translation', {'x': 0, 'y': 0, 'z': 0})
             cor_translation = Vector3([translation['x'], translation['y'], translation['z']], dtype='f4')
 
@@ -182,14 +182,22 @@ def project_label(label_coordinates, input_resolution, tri_mesh, camera, render_
     return [np.array(np_poses).T.reshape((-1, 1, 2))]
 
 
-def get_frame_correction(corrections_data: dict, frame_idx: int) -> Optional[dict]:
+def get_frame_correction(corrections_data: dict, frame_idx: int, central_frame_idx: Optional[int] = None) -> Optional[dict]:
     """
     Get the correction for a specific frame from the corrections data.
     Returns None if no correction is found for the frame or if tz/rz are null.
     """
+    central_correction = None
     for correction in corrections_data["corrections"]:
         if correction["start frame"] <= frame_idx <= correction["end frame"]:
             return correction
+
+        if central_frame_idx is not None and correction["start frame"] <= central_frame_idx <= correction["end frame"]:
+            central_correction = correction
+
+    if central_correction is not None:
+        return central_correction
+
     return corrections_data["default"]
 
 def project_images_for_flight(flight_key: int, split: str, images_folder: str, labels_folder: str, dem_file: str, poses_file: str, correction_matrix_file: str, mask_file: str,
@@ -302,9 +310,13 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                     if frame_idx < neighbour_id <= frame_idx + nr_of_frames_after_current and (neighbour_id - frame_idx) % neighbor_fps == 0:
                         additional_frames.append(neighbour_frame)
                         additional_frame_ids.append(neighbour_id)
+                combined = sorted(zip(previous_frame_ids, previous_frames))
+                previous_frame_ids, previous_frames = zip(*combined)
+                combined = sorted(zip(additional_frame_ids, additional_frames))
+                additional_frame_ids, additional_frames = zip(*combined)
 
-                prev_shots, _, _, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, corrections_data, matched_poses)
-                add_shots, _, _, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, corrections_data, matched_poses)
+                prev_shots, prev_shots_names, _, _, _ = get_shots_for_files(previous_frames, neighbour_folder, ctx, corrections_data, matched_poses, central_frame_idx=frame_idx)
+                add_shots, add_shots_names, _, _, _ = get_shots_for_files(additional_frames, neighbour_folder, ctx, corrections_data, matched_poses, central_frame_idx=frame_idx)
 
 
             for random_z_rotation in random_z_rotations:
@@ -339,7 +351,9 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                         save_name_iter=iter([save_name])
                     )
                 else:
-                    shot_loader = make_shot_loader(prev_shots + [shot] + add_shots)
+                    # shot_names = prev_shots_names + [shot_name] + add_shots_names
+                    all_shots = prev_shots + [shot] + add_shots
+                    shot_loader = make_shot_loader(all_shots)
                     renderer.render_integral(shot_loader,
                         mask=mask,
                         save=True,
