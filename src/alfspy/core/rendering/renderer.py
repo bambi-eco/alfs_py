@@ -255,7 +255,7 @@ class Renderer:
 
     def render_integral(self, shots: Union[CtxShot, Iterable[CtxShot]], release_shots: bool = False,
                         mask: Optional[TextureData] = None, save: bool = False,
-                        save_name: Optional[Iterator[str]] = None, auto_contrast: bool = True) -> Optional[NDArray]:
+                        save_name: Optional[Iterator[str]] = None, auto_contrast: bool = True, alpha_threshold: float = 0.1 ) -> Optional[NDArray]:
         """
         Renders the integral of the given shots on GPU using additive blending. This process will overwrite the current
         blending function and disable the depth test. The image returned will be in the RGBA format.
@@ -265,6 +265,7 @@ class Renderer:
         :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``).
         :param save_name: The file name to be used when saving the result (optional).
         :param auto_contrast: Whether the result should be automatically contrast adjusted (defaults to ``False``).
+        :param alpha_threshold: The threshold the minimum number of overlapping shots to be used as result (defaults to 0.1).
         :return: If save is ``True`` ``None``; otherwise the integral of the projected shots.
         """
         if not isinstance(shots, Iterable):
@@ -285,9 +286,9 @@ class Renderer:
         integral_bytes = self._fbo.read(components=4, dtype='f4', clamp=False)
         integral_arr = np.frombuffer(integral_bytes, dtype=np.single).reshape((*self._fbo.size[1::-1], 4))
         alpha = integral_arr[:, :, -1][:, :, np.newaxis]
-        alpha_mask = (alpha > 0.1) # alpha contains full numbers
+        alpha_mask = (alpha > alpha_threshold) # Note: alpha contains full numbers (e.g. 3 if 3 shots are overlapping)
         out = np.divide(integral_arr, alpha, where=alpha_mask)
-        if auto_contrast:
+        if auto_contrast and alpha_mask.any():
             mask_rgba = np.broadcast_to(alpha_mask, out.shape).copy()
             mask_rgba[:,:,-1] = False # set alpha to 0
             min_val = np.min(out[mask_rgba])
