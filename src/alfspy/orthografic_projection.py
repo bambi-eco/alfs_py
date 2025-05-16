@@ -204,7 +204,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                               OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                               INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
                               config: Dict[str, any], project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, merge_labels_in_alfs: bool,
-                              APPLY_NMS:bool, NMS_IOU: float, rng: np.random.Generator, use_onefile_corrections: bool = False, onefile_corrections_file: Optional[str] = None):
+                              APPLY_NMS:bool, NMS_IOU: float, rng: np.random.Generator, use_onefile_corrections: bool = False, onefile_corrections_file: Optional[str] = None, alpha_threshold: float = 0.1):
     logging.info(f"processing flight: {flight_key}", )
     flight_key_str = str(flight_key)
     mission_id = config["flight_to_mission_mapping"][flight_key_str]
@@ -327,7 +327,8 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                     continue
                 # region image projection
                 # Create new camera for each shot
-                single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2]) + random_z_rotation]))
+                single_shot_camera = make_camera(mesh_aabb, [shot], settings,
+                    rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2]) + random_z_rotation]))
                 logging.info(f"single_shot_camera created")
                 # Create new renderer with the single-shot camera
                 renderer = Renderer(settings.resolution, ctx, single_shot_camera, mesh_data, texture_data)
@@ -358,7 +359,8 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                         mask=mask,
                         save=True,
                         release_shots=False,
-                        save_name=save_name)
+                        save_name=save_name,
+                        alpha_threshold=alpha_threshold)
                 logging.info(f"saved image to {save_name}")
                 # Clean up renderer after each shot
                 renderer.release()
@@ -555,7 +557,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
 def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTHO_WIDTH: int, ORTHO_HEIGHT: int, RENDER_WIDTH: int, RENDER_HEIGHT: int, CAMERA_DISTANCE: int,
                              INITIAL_SKIP: int, ADD_BACKGROUND: bool, FOVY: float, ASPECT_RATIO: float, SAVE_LABELED_IMAGES: bool, INPUT_WIDTH:int, INPUT_HEIGHT:int,
                              project_orthogonal:bool, ADDITIONAL_ROTATIONS: int, ROTATION_LIMIT: float, merge_labels_in_alfs: bool, APPLY_NMS:bool, NMS_IOU: float, IS_THERMAL:bool, rng: np.random.Generator,
-                             use_onefile_corrections: bool = False, onefile_corrections_file: Optional[str] = None):
+                             use_onefile_corrections: bool = False, onefile_corrections_file: Optional[str] = None, alpha_threshold: float = 0.1):
     logging.info(f"projecting images for split {split}")
     if IS_THERMAL:
         images_folder = os.path.join(DATASET_DIR, "images", split)
@@ -609,18 +611,19 @@ def project_images_for_split(split: str, DATASET_DIR: str, OUTPUT_DIR: str, ORTH
                                   OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE,
                                   INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT,
                                   config, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, merge_labels_in_alfs, APPLY_NMS, NMS_IOU, rng,
-                                  use_onefile_corrections, onefile_corrections_file)
+                                  use_onefile_corrections, onefile_corrections_file, alpha_threshold=alpha_threshold)
 
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stdout)])
     logging.info("starting orthografic projection")
-    DEFAULT_DATASET_DIR = r"C:\Users\P41743\Desktop\178"  # "dataset_dir"
-    DEFAULT_OUTPUT_DIR = r"C:\Users\P41743\Desktop\178\bambi_dataset_projection"
+    DEFAULT_DATASET_DIR = r"D:\20250312_Dataset_trimmed"  # "dataset_dir"
+    DEFAULT_OUTPUT_DIR = r"D:\20250312_Dataset_trimmed_alfs_v6"
 
     # Argument parser can be removed since we're using environment variables
-    SPLITS = os.environ.get("SPLITS", "val").split(",")
+    # Argument parser can be removed since we're using environment variables
+    SPLITS = os.environ.get("SPLITS", "val,train").split(",")
     OUTPUT_DIR = os.environ.get("OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
     DATASET_DIR = os.environ.get("INPUT_DIR", DEFAULT_DATASET_DIR)
     ORTHO_WIDTH = int(os.environ.get("ORTHO_WIDTH", 70))
@@ -635,10 +638,10 @@ if __name__ == "__main__":
     FOVY = float(os.environ.get("FOVY", 50.0))
     ASPECT_RATIO = float(os.environ.get("ASPECT_RATIO", 1.0))
     SAVE_LABELED_IMAGES = bool(int(os.environ.get("SAVE_LABELED_IMAGES", 0)))
-    project_orthogonal= False
+    project_orthogonal = False
     merge_labels_in_alfs = bool(int(os.environ.get("MERGE_LABELS_IN_ALFS", 1)))
     ADDITIONAL_ROTATIONS = int(os.environ.get("ADDITIONAL_ROTATIONS", 0))
-    ROTATION_LIMIT = float(os.environ.get("ROTATION_LIMIT", 2*np.pi))
+    ROTATION_LIMIT = float(os.environ.get("ROTATION_LIMIT", 2 * np.pi))
     ROTATION_SEED = int(os.environ.get("ROTATION_SEED", -1))
     ROTATION_LIMIT_RADIAN = bool(int(os.environ.get("ROTATION_LIMIT_RADIAN", 1)))
     APPLY_NMS = bool(int(os.environ.get("APPLY_NMS", 0)))
@@ -646,6 +649,8 @@ if __name__ == "__main__":
     IS_THERMAL = bool(int(os.environ.get("IS_THERMAL", 1)))
     USE_ONEFILE_CORRECTIONS = bool(int(os.environ.get("USE_ONEFILE_CORRECTIONS", 1)))
     ONEFILE_CORRECTIONS_FILE = os.path.join(DATASET_DIR, "corrections.json")
+
+    alpha_threshold = 2
 
     if not ROTATION_LIMIT_RADIAN:
         ROTATION_LIMIT = np.deg2rad(ROTATION_LIMIT)
@@ -655,7 +660,9 @@ if __name__ == "__main__":
     else:
         rng = np.random.default_rng(ROTATION_SEED)
 
-    logging.info(f"Using configuration: {locals()}")
+    ADD_BACKGROUND = False
+    project_orthogonal = False
+    SAVE_LABELED_IMAGES = True
 
     # create output folders if needed
     output_images_folder = os.path.join(OUTPUT_DIR, 'images')
@@ -675,7 +682,7 @@ if __name__ == "__main__":
     # project images for each flight
     for split in SPLITS:
         logging.info(f"starting orthografic projection with split {split}")
-        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, merge_labels_in_alfs, APPLY_NMS, NMS_IOU, IS_THERMAL, rng, USE_ONEFILE_CORRECTIONS, ONEFILE_CORRECTIONS_FILE)
+        project_images_for_split(split, DATASET_DIR, OUTPUT_DIR, ORTHO_WIDTH, ORTHO_HEIGHT, RENDER_WIDTH, RENDER_HEIGHT, CAMERA_DISTANCE, INITIAL_SKIP, ADD_BACKGROUND, FOVY, ASPECT_RATIO, SAVE_LABELED_IMAGES, INPUT_WIDTH, INPUT_HEIGHT, project_orthogonal, ADDITIONAL_ROTATIONS, ROTATION_LIMIT, merge_labels_in_alfs, APPLY_NMS, NMS_IOU, IS_THERMAL, rng, USE_ONEFILE_CORRECTIONS, ONEFILE_CORRECTIONS_FILE, alpha_threshold=alpha_threshold)
         logging.info("done with split", split)
 
     logging.info("done")
