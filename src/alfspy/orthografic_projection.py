@@ -10,7 +10,7 @@ from moderngl import Context
 import numpy as np
 
 from alfspy.core.rendering import Resolution, Camera, CtxShot, RenderResultMode, TextureData
-from pyrr import Quaternion, Vector3
+from pyrr import Matrix44, Quaternion, Vector3
 from trimesh import Trimesh
 
 from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
@@ -325,10 +325,10 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                         os.path.join(output_labels_folder, f"{shot_name.split('.')[0]}_{str(random_z_rotation).replace('.', '_')}.txt")):
                     logging.info("Already exists, skip")
                     continue
+                random_rotation = Matrix44.from_z_rotation(random_z_rotation)
                 # region image projection
                 # Create new camera for each shot
-                single_shot_camera = make_camera(mesh_aabb, [shot], settings,
-                    rotation= Quaternion.from_eulers([(shot_rotation_eulers[0] - cor_rotation_eulers[0]), (shot_rotation_eulers[1] - cor_rotation_eulers[1]), (shot_rotation_eulers[2] - cor_rotation_eulers[2]) + random_z_rotation]))
+                single_shot_camera = make_camera(mesh_aabb, [shot], settings, rotation=Quaternion.from_matrix( shot.get_view().inverse @ shot.get_correction().inverse @ random_rotation ))
                 logging.info(f"single_shot_camera created")
                 # Create new renderer with the single-shot camera
                 renderer = Renderer(settings.resolution, ctx, single_shot_camera, mesh_data, texture_data)
