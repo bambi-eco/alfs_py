@@ -410,7 +410,9 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                                     )
 
                         # project labels
+                        # TODO redraw labels from non-target species as black rectangle
                         # TODO fix labels based on alpha value used for projection!!!!
+                        # TODO check if label is completely outside of image (mask based or all pixels black) -> delete those
                         camera = get_camera_for_frame(matched_poses, frame_idx, cor_rotation_eulers, cor_translation)
                         for class_id, poly_coords in frame_labels:
                             poly_lines = project_label(poly_coords, input_resolution, tri_mesh, camera, render_resolution, single_shot_camera)
