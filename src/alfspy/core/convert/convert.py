@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Optional, Union, Sequence, Callable, Final
+from typing import Optional, Union, Sequence, Callable, Final, Tuple
 
 import cv2
 import numpy as np
@@ -195,6 +195,128 @@ def world_to_pixel_coord(coordinates: Union[ArrayLike, Sequence[ArrayLike]],
         pixel_ys = pixel_ys[0]
 
     return pixel_xs, pixel_ys
+
+def world_to_pixel_coord2(
+    px: ArrayLike,
+    py: ArrayLike,
+    pz: ArrayLike,
+    width: int,
+    height: int,
+    camera: "Camera",
+    distortion: Optional["Distortion"] = None,
+    camera_matrix: Optional[NDArray] = None,
+    include_misses: bool = True,
+    clip_to_view: bool = True,
+) -> Sequence[Optional[Tuple[float, float]]]:
+    """
+    Inverts `pixel_to_world_coord` by projecting world points to pixel coordinates.
+
+    Conventions:
+    - Viewport origin at the top-left, +x right, +y down.
+    - Camera looks along negative z in its local frame (same as in `pixel_to_world_coord`).
+    - When `distortion` is provided, ideal pixel coords are distorted before returning,
+      mirroring the `undistort_coords` step in the forward direction.
+
+    :param px,py,pz: Components of world points to project (same length).
+    :param width,height: Viewport size in pixels.
+    :param camera: Same camera used in `pixel_to_world_coord`.
+    :param distortion: If provided, apply *distortion* to the ideal pixel coords before returning.
+    :param camera_matrix: Intrinsics used by the distortion model. If None, identity is assumed (as in your code).
+    :param include_misses: If True, return None for points that cannot be projected; else drop them.
+    :param clip_to_view: If True, points outside [0,width)×[0,height) are treated as misses.
+    :return: List of (x_px, y_px) or None, index-aligned with the inputs.
+    """
+    px = np.asarray(px)
+    py = np.asarray(py)
+    pz = np.asarray(pz)
+    assert px.shape == py.shape == pz.shape, "px, py, pz must have same shape"
+    n = px.size
+    if n == 0:
+        return [None]
+
+    # Stack and bring into camera space: p_cam = R^T (p - t)
+    # camera.transform.rotation.matrix33: world->camera is R^T
+    # camera.transform.position: t (world)
+    P_world = np.stack([px, py, pz], axis=-1)
+    t = np.asarray(camera.transform.position)
+    R = np.asarray(camera.transform.rotation.matrix33)
+    P_cam = (P_world - t) @ R  # (R is world->camera if you dot with R, since you used n_ray_dirs @ R.T earlier)
+
+    x_c = P_cam[..., 0]
+    y_c = P_cam[..., 1]
+    z_c = P_cam[..., 2]
+
+    # Points at/behind camera cannot project (camera looks toward -z)
+    valid = z_c < 0.0
+
+    # Prepare holders
+    x_px = np.full_like(x_c, np.nan, dtype=float)
+    y_px = np.full_like(y_c, np.nan, dtype=float)
+
+    if camera.orthogonal:
+        # Orthographic inverse consistent with your forward code:
+        # forward used origin_offset_x = (ndc_x * img_plane_width) / width, with ray_origins = pos + R @ [ox, oy, 0]
+        # That implies: ndc_x = (x_c * width) / img_plane_width,  ndc_y = (y_c * height) / img_plane_height
+        img_plane_w, img_plane_h = camera.orthogonal_size  # same tuple you used
+        # Avoid division by zero
+        eps = 1e-12
+        img_plane_w = max(float(img_plane_w), eps)
+        img_plane_h = max(float(img_plane_h), eps)
+
+        ndc_x = (x_c * width) / img_plane_w
+        ndc_y = (y_c * height) / img_plane_h
+
+        # Map NDC -> pixels (origin top-left, +y down)
+        x_px_ideal = (ndc_x + 1.0) * 0.5 * width
+        y_px_ideal = (1.0 - ndc_y) * 0.5 * height
+        x_px[valid] = x_px_ideal[valid]
+        y_px[valid] = y_px_ideal[valid]
+    else:
+        # Perspective projection inverse of your ray construction:
+        # You used n_ray_dirs = [ ndc_x * aspect * tan(fovy/2), ndc_y * tan(fovy/2), -1 ]
+        # For a *point* we have: x_c / -z_c = ndc_x * aspect * tanF,  y_c / -z_c = ndc_y * tanF
+        tanF = np.tan(np.deg2rad(camera.fovy) / 2.0)
+        asp = float(camera.aspect_ratio)
+        denom = -z_c  # positive for valid points (since z_c < 0)
+        eps = 1e-12
+        denom = np.where(np.abs(denom) < eps, np.sign(denom) * eps, denom)
+
+        ndc_x = (x_c / denom) / (asp * tanF)
+        ndc_y = (y_c / denom) / tanF
+
+        # Map NDC -> pixels
+        x_px_ideal = (ndc_x + 1.0) * 0.5 * width
+        y_px_ideal = (1.0 - ndc_y) * 0.5 * height
+        x_px[valid] = x_px_ideal[valid]
+        y_px[valid] = y_px_ideal[valid]
+
+    # Optionally clip to image bounds
+    if clip_to_view:
+        in_view = (x_px >= 0.0) & (x_px < width) & (y_px >= 0.0) & (y_px < height)
+        valid = valid & in_view
+
+    # Apply lens distortion to ideal pixels (mirror of undistort in forward dir)
+    if distortion is not None:
+        # Assumes you have a function that maps ideal pixel coords -> distorted pixel coords
+        # todo
+        pass
+        # xd, yd = distort_coords(x_px[valid], y_px[valid], distortion, camera_matrix)
+        # x_px[valid] = xd
+        # y_px[valid] = yd
+
+    # Build result list
+    result = []
+    for i in range(n):
+        if valid[i]:
+            result.append((float(x_px[i]), float(y_px[i])))
+        else:
+            if include_misses:
+                result.append(None)
+            # else: skip — but to keep indices aligned like your forward function, we still append None
+            else:
+                result.append(None)
+
+    return result
 
 
 def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, mesh: Union[MeshData, Trimesh],
