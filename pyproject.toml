@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "gltflib==1.0.13",
     "moderngl==5.8.2",
-    "numpy~=1.23.5",
+    "numpy>=1.23.5",
     "opencv-python>=4.7.0.72",
     "Office365-REST-Python-Client>=2.4.1",
     "Pillow>=9.5.0",
