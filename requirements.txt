@@ -1,5 +1,5 @@
 ﻿gltflib==1.0.13
-moderngl==5.8.2
+moderngl>=5.8.2
 numpy~=1.23.5
 opencv-python>=4.7.0.72
 Office365-REST-Python-Client>=2.4.1
@@ -10,3 +10,4 @@ trimesh[easy]==4.6.6
 Rtree==1.3.0
 
 embreex==2.17.7.post5
+
