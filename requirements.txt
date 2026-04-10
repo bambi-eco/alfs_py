@@ -11,3 +11,13 @@ Rtree==1.3.0
 
 embreex==2.17.7.post5
 
+matplotlib>=3.7.0
+
+# DINOv3 embedding support
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.56.0
+safetensors>=0.4.0
+scikit-learn>=1.3.0
+# umap-learn>=0.5.0  # optional: install manually if UMAP reduction is needed
+
