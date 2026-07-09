@@ -221,11 +221,11 @@ def main():
         help="Dimensionality reduction method (default: pca)",
     )
     parser.add_argument(
-        "--components", type=int, choices=[1, 2, 3], default=3,
+        "--components", type=int, choices=[1, 2, 3], default=1,
         help="Number of output components: 1=heatmap, 3=RGB (default: 3)",
     )
     parser.add_argument(
-        "--side-by-side", metavar="RGB_PATH", dest="rgb_path", default=r"Z:\Hugo\alfs\images\train\101_962.jpg",
+        "--side-by-side", metavar="RGB_PATH", dest="rgb_path", default=r"Z:\Hugo\alfs\images\train\101_962.npy",
         help="Optional RGB reference image shown alongside the embedding",
     )
     parser.add_argument(

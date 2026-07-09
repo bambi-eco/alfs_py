@@ -227,6 +227,10 @@ def render_embedding_for_flight(
     frames_to_process = []
     for frame_file in flight_frames:
         stem = Path(frame_file).stem
+        logging.info(stem)
+        # if stem != "276_2605":
+        #     continue
+        print(stem)
         if not os.path.exists(os.path.join(output_emb_dir, f"{stem}.npy")):
             frames_to_process.append(frame_file)
 
@@ -440,7 +444,7 @@ def main():
         corrections_dir = os.environ.get("CORRECTIONS_DIR", r"Z:\correction_data2"),
         output_dir    = os.environ.get("OUTPUT_DIR",    r"Z:\Hugo\embedded_fields_upa"),
 
-        splits                = os.environ.get("SPLITS", "train").split(","),
+        splits                = os.environ.get("SPLITS", "test").split(","),
         neighbor_range_before = int(os.environ.get("NEIGHBOR_RANGE_BEFORE", 90)),
         neighbor_range_after  = int(os.environ.get("NEIGHBOR_RANGE_AFTER",  90)),
         frame_stride          = int(os.environ.get("FRAME_STRIDE", 3)),
@@ -484,13 +488,14 @@ def main():
         logging.info(f"Found {len(flights)} flights")
 
         for flight_id, flight_frames in flights.items():
-            if flight_id != 101:
+            if flight_id != 276:
                 continue
             logging.info(f"Processing flight {flight_id}")
             render_embedding_for_flight(
                 flight_id, split, config, flight_frames,
                 extractor, upsampler,
             )
+            break
 
 
 if __name__ == "__main__":
