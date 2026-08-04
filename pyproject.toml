@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alfspy"]
+
+[project]
+name = "AlfsTorch"
+version = "1.0.0"
+description = "Renderer for airborne light-field sampling data implemented via PyTorch"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+    "Topic :: Multimedia :: Graphics :: Capture :: Digital Camera",
+]
+
+# Version policy (see docs/MIGRATION_REVIEW.md section 5):
+#   - torch is deliberately given a wide floor and no ceiling. The rasteriser uses only
+#     long-stable primitives plus Tensor.scatter_reduce_, which sets the >=1.13 floor and is
+#     probed at import time by alfspy.core.torchgl.compat.
+#   - numpy is unpinned above 1.23 and is NumPy 2.x compatible. The upstream `numpy~=1.23.5`
+#     pin would have blocked every torch wheel built against NumPy 2.
+#   - trimesh: upstream pinned 3.21.7 here while requirements.txt pinned 4.6.6. Resolved in
+#     favour of a range covering both.
+dependencies = [
+    "gltflib>=1.0.13",
+    "numpy>=1.23.5",
+    "opencv-python>=4.7.0.72",
+    "Pillow>=9.5.0",
+    "pyrr>=0.10.3",
+    "torch>=1.13",
+    "trimesh[easy]>=3.21,<6",
+]
+
+[project.optional-dependencies]
+# Optional accelerated ray/mesh backends for trimesh. Pure-Python fallbacks are used when
+# these are absent, so they are not required for correctness -- only for label-projection
+# throughput on large DEMs.
+accel = [
+    "Rtree>=1.0",
+    "embreex>=2.17; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+]
+test = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+alfs = "alfspy.cli:main"
+
+[tool.pytest.ini_options]
+# Collect only from test/. The package tree contains developer scratch scripts whose names
+# would otherwise be picked up.
+testpaths = ["test"]
+pythonpath = ["src"]
+markers = [
+    "slow: end-to-end renders at production-like resolutions",
+    "cuda: requires a CUDA device",
+    "parity: compares against a reference ModernGL install (needs ALFS_REFERENCE_PATH)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:pyrr.*",
+    "ignore::DeprecationWarning:trimesh.*",
+]

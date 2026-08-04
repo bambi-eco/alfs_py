@@ -1,0 +1,12 @@
+# Normalise line endings in the repository. The project is developed on Windows but its CI
+# and Docker image run on Linux, so without this the checked-in files would carry CRLF and
+# shell scripts / Dockerfile heredocs could break on Linux.
+* text=auto eol=lf
+
+# Binary assets: never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.glb binary
+*.bin binary
+*.npy binary

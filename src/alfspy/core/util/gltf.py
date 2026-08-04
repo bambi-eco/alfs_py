@@ -1,0 +1,189 @@
+import io
+from typing import Optional
+from urllib.request import urlopen
+
+import numpy as np
+from gltflib import GLTF
+from numpy.typing import NDArray
+
+from alfspy.core.rendering.data import MeshData, TextureData
+from alfspy.core.geo.transform import Transform
+from alfspy.core.util.image import bytes_to_img
+
+
+def _resolve_buffer(gltf: GLTF, buffer_idx: int) -> bytes:
+    """
+    Returns the raw bytes of the given GLTF buffer.
+
+    Upstream this was ``gltf.resources[0].data``, which assumes the geometry buffer is the
+    *first* resource. That does not hold once a file also embeds its texture as a data URI:
+    gltflib collects resources in an order that is not guaranteed (it varies between runs on
+    the same file), so the reader would sometimes decode the PNG as vertex floats and produce
+    silent garbage. Resolving by the buffer's own URI removes the assumption.
+
+    :param gltf: The ``GLTF`` object holding all data.
+    :param buffer_idx: Index of the buffer to resolve.
+    :return: The buffer's bytes.
+    """
+    buffer = gltf.model.buffers[buffer_idx]
+    uri = getattr(buffer, 'uri', None)
+
+    if uri is not None:
+        resource = None
+        get_resource = getattr(gltf, 'get_resource', None)
+        if get_resource is not None:
+            resource = get_resource(uri)
+        if resource is None:
+            for candidate in gltf.resources:
+                if getattr(candidate, 'uri', None) == uri:
+                    resource = candidate
+                    break
+        if resource is not None:
+            data = getattr(resource, 'data', None)
+            if data is None and hasattr(resource, 'load'):
+                resource.load()
+                data = getattr(resource, 'data', None)
+            if data is not None:
+                return data
+
+    # GLB: the binary chunk has no URI, so fall back to the sole (or first) resource.
+    for candidate in gltf.resources:
+        data = getattr(candidate, 'data', None)
+        if data is not None and len(data) >= (buffer.byteLength or 0):
+            return data
+
+    raise ValueError(f'Could not resolve the data of GLTF buffer {buffer_idx}')
+
+
+def _get_from_buffer(idx: int, gltf: GLTF, comp: int, dtype: str = 'f4') -> NDArray:
+    """
+    Interprets the portion of the buffer of the given ``GLTF`` object
+    associated with the given accessor index as a vector with given amount of components.
+    :param idx: Accessor index of the data to be read.
+    :param gltf: The ``GLTF`` object holding all data.
+    :param comp: The amount of components of the vectors to read.
+    :param dtype: The type the read values should be converted to.
+    :return: A numpy array representing all read vectors.
+    """
+    accessor = gltf.model.accessors[idx]
+    buf_view = gltf.model.bufferViews[accessor.bufferView]
+    buffer = _resolve_buffer(gltf, buf_view.buffer or 0)
+
+    byte_offset = (buf_view.byteOffset or 0) + (accessor.byteOffset or 0)
+    byte_stride = buf_view.byteStride or (comp * np.dtype(dtype).itemsize)
+
+    data_bytes = buffer[byte_offset: byte_offset + buf_view.byteLength]
+    raw_data = np.frombuffer(data_bytes, dtype=dtype)
+    data = np.lib.stride_tricks.as_strided(raw_data, shape=(accessor.count, comp), strides=(byte_stride, raw_data.itemsize))
+    return data.copy()
+
+
+def gltf_to_mesh_data(gltf: GLTF, transform: Optional[Transform] = None) -> Optional[MeshData]:
+    """
+    Extracts the first mesh found within the ``GLTF`` object.
+    :param gltf: The ``GLTF`` object to extract the mesh from.
+    :param transform: The transform to add to the extracted mesh data (optional).
+    :return: If the ``GLTF`` object contains no meshes returns ``None``;
+    otherwise returns a ``MeshData`` object containing vertices, indices and UV coordinates.
+    If indices and/or UV coordinates cannot be extracted they will be set to None.
+    """
+    if len(gltf.model.meshes) < 1 or len(gltf.model.meshes[0].primitives) < 1:
+        return None
+
+    primitive = gltf.model.meshes[0].primitives[0]
+    mesh_attrs = primitive.attributes
+
+    vertices = _get_from_buffer(mesh_attrs.POSITION, gltf, 3)
+
+    indices = None
+    if primitive.indices is not None:
+        accessor = gltf.model.accessors[primitive.indices]
+        indices_dtype = 'u2' if accessor.componentType == 5123 else 'u4'
+        indices = _get_from_buffer(primitive.indices, gltf, 1, dtype=indices_dtype)
+        indices = np.reshape(indices, (-1, 3)).astype(np.uint32)
+
+    uvs_idx = mesh_attrs.TEXCOORD_0
+    uvs = _get_from_buffer(uvs_idx, gltf, 2) if uvs_idx is not None else None
+
+    return MeshData(vertices, indices, uvs, transform)
+
+
+def gltf_to_texture_data(gltf: GLTF) -> Optional[TextureData]:
+    """
+    Extracts the texture of the main mesh found within the ``GLTF`` object.
+    :param gltf: The ``GLTF`` object to extract the texture from.
+    :return: If the there is no mesh within the ``GLTF`` object or the main mesh has no texture returns ``None``;
+    otherwise returns a ``TextureData`` object containing the extracted texture.
+    """
+
+    if len(gltf.model.meshes) < 1 or len(gltf.model.meshes[0].primitives) < 1:  # No main mesh exists
+        return None
+
+    material_idx = gltf.model.meshes[0].primitives[0].material  # Main mesh has no material
+    if material_idx is None:
+        return None
+
+    material = gltf.model.materials[material_idx]
+    texture_info = material.pbrMetallicRoughness.baseColorTexture
+    if texture_info is None or texture_info.index is None:  # Material has no texture assigned
+        return None
+
+    # Upstream indexed `images` with the *texture* index, which only coincides when textures
+    # and images are declared in the same order. Go through the texture's `source` when it is
+    # available and fall back to the old behaviour otherwise.
+    texture_idx = texture_info.index
+    image_idx = texture_idx
+    textures = getattr(gltf.model, 'textures', None)
+    if textures is not None and texture_idx < len(textures):
+        source = getattr(textures[texture_idx], 'source', None)
+        if source is not None:
+            image_idx = source
+
+    if image_idx >= len(gltf.model.images):
+        return None
+
+    # assume texture is embedded using a base64 URI
+    uri = gltf.model.images[image_idx].uri
+    if uri is None:  # image stored in a buffer view rather than a URI
+        return None
+
+    with urlopen(uri) as resp:
+        data = resp.read()
+    texture = bytes_to_img(data)
+    texture = texture[::-1, ...]  # texture is extracted horizontally flipped
+    return TextureData(texture) if texture is not None else None
+
+
+def gltf_extract(file: str, transform: Optional[Transform] = None) -> tuple[Optional[MeshData], Optional[TextureData]]:
+    """
+    Extracts mesh and texture data from a GLTF file via ``get_mesh_data`` and ``get_texture_data``.
+    :param file: Path to a GLTF file.
+    :param transform: The transform to add to the extracted mesh data (optional).
+    :return: A tuple containing the results of ``get_mesh_data`` and ``get_texture_data``.
+    """
+    gltf_data = GLTF.load(file, load_file_resources=True)
+    return gltf_to_mesh_data(gltf_data, transform), gltf_to_texture_data(gltf_data)
+
+def glb_extract_from_bytes(data: bytes, transform: Optional[Transform] = None)-> \
+        tuple[Optional[MeshData], Optional[TextureData]]:
+    """
+    Extracts mesh and texture data from GLB byte data via ``get_mesh_data`` and ``get_texture_data``.
+    :param data: Bytes representing GLB data.
+    :param transform: The transform to add to the extracted mesh data (optional).
+    :return: A tuple containing the results of ``get_mesh_data`` and ``get_texture_data``.
+    """
+    data_stream = io.BytesIO(data)
+    gltf_data = GLTF.read_glb(data_stream, load_file_resources=False)
+    return gltf_to_mesh_data(gltf_data, transform), gltf_to_texture_data(gltf_data)
+
+def gltf_extract_from_bytes(data: bytes, transform: Optional[Transform] = None)-> \
+        tuple[Optional[MeshData], Optional[TextureData]]:
+    """
+    Extracts mesh and texture data from GLTF byte data via ``get_mesh_data`` and ``get_texture_data``.
+    :param data: Bytes representing GLTF data.
+    :param transform: The transform to add to the extracted mesh data (optional).
+    :return: A tuple containing the results of ``get_mesh_data`` and ``get_texture_data``.
+    """
+    data_stream = io.BytesIO(data)
+    gltf_data = GLTF.read_gltf(data_stream, load_file_resources=False)
+    return gltf_to_mesh_data(gltf_data, transform), gltf_to_texture_data(gltf_data)
