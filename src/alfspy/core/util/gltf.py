@@ -11,11 +11,56 @@ from alfspy.core.geo.transform import Transform
 from alfspy.core.util.image import bytes_to_img
 
 
+def _resolve_buffer(gltf: GLTF, buffer_idx: int) -> bytes:
+    """
+    Returns the raw bytes of the given GLTF buffer.
+
+    Previously this was ``gltf.resources[0].data``, which assumes the geometry buffer is the
+    *first* resource. That does not hold once a file also embeds its texture as a data URI:
+    gltflib collects resources in an order that is not guaranteed (it varies between runs on
+    the same file), so the reader could decode the PNG as vertex floats and produce silent
+    garbage -- correct array shapes, meaningless values. Resolving by the buffer's own URI
+    removes the assumption.
+
+    :param gltf: The ``GLTF`` object holding all data.
+    :param buffer_idx: Index of the buffer to resolve.
+    :return: The buffer's bytes.
+    """
+    buffer = gltf.model.buffers[buffer_idx]
+    uri = getattr(buffer, 'uri', None)
+
+    if uri is not None:
+        resource = None
+        get_resource = getattr(gltf, 'get_resource', None)
+        if get_resource is not None:
+            resource = get_resource(uri)
+        if resource is None:
+            for candidate in gltf.resources:
+                if getattr(candidate, 'uri', None) == uri:
+                    resource = candidate
+                    break
+        if resource is not None:
+            data = getattr(resource, 'data', None)
+            if data is None and hasattr(resource, 'load'):
+                resource.load()
+                data = getattr(resource, 'data', None)
+            if data is not None:
+                return data
+
+    # GLB: the binary chunk has no URI, so fall back to the sole (or first) resource.
+    for candidate in gltf.resources:
+        data = getattr(candidate, 'data', None)
+        if data is not None and len(data) >= (buffer.byteLength or 0):
+            return data
+
+    raise ValueError(f'Could not resolve the data of GLTF buffer {buffer_idx}')
+
+
 def _get_from_buffer(idx: int, gltf: GLTF, comp: int, dtype: str = 'f4') -> NDArray:
     """
-    Interprets the portion of the first buffer of the given ``GLTF`` object
-    associated with the given buffer view index as a vector with given amount of components.
-    :param idx: Buffer view index of the data to be read.
+    Interprets the portion of the buffer of the given ``GLTF`` object
+    associated with the given accessor index as a vector with given amount of components.
+    :param idx: Accessor index of the data to be read.
     :param gltf: The ``GLTF`` object holding all data.
     :param comp: The amount of components of the vectors to read.
     :param dtype: The type the read values should be converted to.
@@ -23,9 +68,9 @@ def _get_from_buffer(idx: int, gltf: GLTF, comp: int, dtype: str = 'f4') -> NDAr
     """
     accessor = gltf.model.accessors[idx]
     buf_view = gltf.model.bufferViews[accessor.bufferView]
-    buffer = gltf.resources[0].data
+    buffer = _resolve_buffer(gltf, buf_view.buffer or 0)
 
-    byte_offset = buf_view.byteOffset + (accessor.byteOffset or 0)
+    byte_offset = (buf_view.byteOffset or 0) + (accessor.byteOffset or 0)
     byte_stride = buf_view.byteStride or (comp * np.dtype(dtype).itemsize)
 
     data_bytes = buffer[byte_offset: byte_offset + buf_view.byteLength]
@@ -84,8 +129,23 @@ def gltf_to_texture_data(gltf: GLTF) -> Optional[TextureData]:
     if texture_info is None or texture_info.index is None:  # Material has no texture assigned
         return None
 
+    # The texture index and the image index only coincide when textures and images are
+    # declared in the same order. Go through the texture's `source` when available.
+    texture_idx = texture_info.index
+    image_idx = texture_idx
+    textures = getattr(gltf.model, 'textures', None)
+    if textures is not None and texture_idx < len(textures):
+        source = getattr(textures[texture_idx], 'source', None)
+        if source is not None:
+            image_idx = source
+
+    if image_idx >= len(gltf.model.images):
+        return None
+
     # assume texture is embedded using a base64 URI
-    uri = gltf.model.images[texture_info.index].uri
+    uri = gltf.model.images[image_idx].uri
+    if uri is None:  # image stored in a buffer view rather than a URI
+        return None
 
     with urlopen(uri) as resp:
         data = resp.read()

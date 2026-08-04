@@ -11,7 +11,7 @@ from pyrr import Quaternion, Vector3
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.data import Resolution
 from alfspy.core.util.defs import MODULE_DIR
-from alfspy.render import CameraPositioningMode, IntegralSettings, render_integral, render_integral_sp
+from alfspy.render import CameraPositioningMode, IntegralSettings, render_integral
 
 OUTPUT_DIR: Final[str] = os.path.join(MODULE_DIR, '..', '..', 'output')
 INPUT_DIR: Final[str] = os.path.join(MODULE_DIR, '..', '..', 'input')
@@ -86,36 +86,6 @@ def run() -> None:
         #     output_file=output_file
         # )
         # animate_shutter(gltf_file, shot_json_file, mask_file, settings)
-
-
-def run_sp():
-    frame_type = 'W'
-
-    config_file = os.path.join(RESOURCES_DIR, 'sharepoint_dev_config.json')
-    gltf_file = rf'MISC\DEM\Hagenberg\dem_mesh_r2.glb'
-    data_root = rf'Processed\FH\2023_04_04_Hagenberg\M30T\NeRF grid\Frames_{frame_type}'
-    shot_json_file = data_root + r'\poses.json'
-    mask_file =  data_root + rf'\mask_{frame_type}.png'
-    count = 10
-    # if frame_type == 'T':
-    #     center = 35380
-    # elif frame_type == 'W':
-    #     center = 35820
-    # else:
-    #     center = count // 2
-    # first = center - count // 2
-    first = 0
-
-
-    correction = Transform()
-    correction.position.z = 2.0
-    correction.rotation = Quaternion.from_z_rotation(-np.deg2rad(1.0), dtype='f4')
-    output_file = os.path.join(OUTPUT_DIR, f'integral_sp.png')
-    settings = IntegralSettings(count=count, initial_skip=first, camera_dist=10.0, add_background=True,
-                                camera_position_mode=CameraPositioningMode.BackgroundCentered,
-                                correction=correction, resolution=Resolution(2109, 4096), fovy=50.0, aspect_ratio=1.0,
-                                orthogonal=True, show_integral=True, output_file=output_file)
-    render_integral_sp(config_file, gltf_file, shot_json_file, mask_file, settings)
 
 
 if __name__ == '__main__':

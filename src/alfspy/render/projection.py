@@ -53,7 +53,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import cv2
 import moderngl
 import numpy as np
-from pyrr import Quaternion, Vector3
+from pyrr import Matrix44, Quaternion, Vector3
 from trimesh import Trimesh
 
 from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
@@ -295,18 +295,29 @@ class ProjectionScene:
             resolution=self.settings.render_resolution,
         )
 
+    @staticmethod
+    def _rotation_for(meta: dict) -> Quaternion:
+        """
+        Builds the shot rotation from a pose entry.
+
+        Shared by :meth:`_make_shot` and :meth:`_camera_for_frame` so the camera used to
+        *render* a frame and the camera used to *un-project its labels* cannot drift apart.
+
+        :param meta: The pose entry for one frame.
+        :return: The rotation of that frame's camera.
+        """
+        rotation = [val % 360.0 for val in meta["rotation"]]
+        if len(rotation) == 3:
+            return quaternion_from_eulers([np.deg2rad(v) for v in rotation], "zyx")
+        if len(rotation) == 4:
+            return Quaternion(rotation)
+        raise ValueError(f"Invalid rotation format of length {len(rotation)}: {rotation}")
+
     def _make_shot(self, image_path: str, frame_idx: int) -> CtxShot:
         """Create a :class:`CtxShot` for ``image_path`` from the pose at ``frame_idx``."""
         meta = self.images[frame_idx]
         position = Vector3(meta["location"])
-
-        rotation = [val % 360.0 for val in meta["rotation"]]
-        if len(rotation) == 3:
-            rotation = quaternion_from_eulers([np.deg2rad(v) for v in rotation], "zyx")
-        elif len(rotation) == 4:
-            rotation = Quaternion(rotation)
-        else:
-            raise ValueError(f"Invalid rotation format of length {len(rotation)}: {rotation}")
+        rotation = self._rotation_for(meta)
 
         fov = _get_fovy(meta, self.settings.fovy)
         return CtxShot(self.ctx, image_path, position, rotation, fov, 1, self.correction, lazy=False)
@@ -342,14 +353,40 @@ class ProjectionScene:
         return float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())
 
     def _camera_for_frame(self, frame_idx: int) -> Camera:
-        """Camera matching the original source frame, used to ray-cast labels onto the mesh."""
+        """
+        Camera matching the original source frame, used to ray-cast labels onto the mesh.
+
+        This is derived from the *same* matrices the renderer uses for that frame's shot --
+        the shot camera's view matrix composed with the correction, exactly as the shot
+        shader applies them (``P * C * V``). Label un-projection and image projection
+        therefore agree by construction.
+
+        Previously this rebuilt the camera by hand as ``position + correction_translation``
+        and ``-(eulers - correction_eulers)``. The negation existed to cancel a transposed
+        rotation in ``pixel_to_world_coord``; both have now been fixed. The negation was also
+        only *approximately* a transpose: ``R(-e) == R(e).T`` holds for a single-axis
+        rotation but not for composed Euler angles, so any frame with real pitch or roll had
+        its labels projected through a camera off by several degrees. Near-nadir flights hid
+        this because their poses are effectively yaw-only.
+
+        :param frame_idx: Index into the poses ``images`` list.
+        :return: A camera whose view matrix equals the renderer's corrected shot view.
+        """
         meta = self.images[frame_idx]
         fovy = _get_fovy(meta, self.settings.fovy)
-        position = Vector3(meta["location"]) + self._cor_translation
-        rotation_eulers = (Vector3([np.deg2rad(v % 360.0) for v in meta["rotation"]])
-                           - self._cor_rotation_eulers) * -1
-        return Camera(fovy=fovy, aspect_ratio=self.settings.aspect_ratio,
-                      position=position, rotation=Quaternion.from_eulers(rotation_eulers))
+
+        shot_camera = Camera(fovy=fovy, aspect_ratio=self.settings.aspect_ratio,
+                             position=Vector3(meta["location"]),
+                             rotation=self._rotation_for(meta))
+
+        correction = Transform(self.correction.position, self.correction.rotation,
+                               self.correction.scale, dtype="f4")
+        correction_matrix = correction.trans_mat.inverse * correction.rot_mat
+
+        view = (np.asarray(shot_camera.get_view(), dtype=np.float64)
+                @ np.asarray(correction_matrix, dtype=np.float64))
+
+        return _camera_from_view(view, fovy, self.settings.aspect_ratio)
 
     # endregion
 
@@ -522,6 +559,32 @@ class ProjectionScene:
 def frame_index_from_path(image_path: str) -> int:
     """Extract the frame index from a ``<flight>_<index>.<ext>`` file name."""
     return int(Path(image_path).stem.rsplit("_", 1)[1])
+
+
+def _camera_from_view(view: np.ndarray, fovy: float, aspect_ratio: float) -> Camera:
+    """
+    Reconstructs a :class:`Camera` whose ``get_view()`` reproduces the given view matrix.
+
+    Matrices are in pyrr's row-vector convention, so the inverse of a view matrix is the
+    camera-to-world transform: its translation lives in row 3 and its rotation in the
+    upper-left 3x3 block.
+
+    :param view: A ``(4, 4)`` world-to-camera matrix.
+    :param fovy: The field of view to give the reconstructed camera.
+    :param aspect_ratio: The aspect ratio to give the reconstructed camera.
+    :return: A camera equivalent to the given view.
+    """
+    to_world = np.linalg.inv(np.asarray(view, dtype=np.float64))
+
+    rotation_matrix = np.eye(4)
+    rotation_matrix[:3, :3] = to_world[:3, :3]
+
+    return Camera(
+        fovy=fovy,
+        aspect_ratio=aspect_ratio,
+        position=Vector3(to_world[3, :3].astype("f4")),
+        rotation=Quaternion.from_matrix(Matrix44(rotation_matrix.astype("f4"))),
+    )
 
 
 def _get_fovy(meta: dict, fallback: float) -> float:

@@ -222,7 +222,10 @@ class Renderer:
 
             alpha = integral_arr[:, :, -1][:, :, np.newaxis]
             alpha_mask = (alpha > 0.0)
-            out = np.divide(integral_arr, alpha, where=alpha_mask)
+            # `out=` is essential: np.divide with `where=` leaves the excluded entries at
+            # whatever the freshly allocated buffer happened to contain. See render_integral.
+            out = np.divide(integral_arr, alpha, where=alpha_mask,
+                            out=np.zeros_like(integral_arr, dtype=np.float64))
             result = (out * 255).astype(np.uint8)
 
             del integral_arr
@@ -287,13 +290,23 @@ class Renderer:
         integral_arr = np.frombuffer(integral_bytes, dtype=np.single).reshape((*self._fbo.size[1::-1], 4))
         alpha = integral_arr[:, :, -1][:, :, np.newaxis]
         alpha_mask = (alpha > alpha_threshold) # Note: alpha contains full numbers (e.g. 3 if 3 shots are overlapping)
-        out = np.divide(integral_arr, alpha, where=alpha_mask)
+
+        # `out=` is essential. numpy's `where=` does not initialise the excluded entries, so
+        # without an explicit output array every below-threshold pixel holds whatever was in
+        # the freshly allocated buffer -- uninitialised heap memory. It then goes through
+        # `* 255` and `.astype(np.uint8)`, producing values that change between runs and
+        # overflow or turn into NaN. This is a host-side source of the intermittent artifacts
+        # reported for the Xvfb deployment, and it is independent of OpenGL: it was usually
+        # masked on-premise because `add_background=True` paints over the uncovered region.
+        out = np.divide(integral_arr, alpha, where=alpha_mask,
+                        out=np.zeros_like(integral_arr, dtype=np.single))
         if auto_contrast and alpha_mask.any():
             mask_rgba = np.broadcast_to(alpha_mask, out.shape).copy()
             mask_rgba[:,:,-1] = False # set alpha to 0
             min_val = np.min(out[mask_rgba])
             max_val = np.max(out[mask_rgba])
-            out[mask_rgba] = (out[mask_rgba] - min_val) / (max_val - min_val)
+            if max_val > min_val:  # a uniform region would divide by zero
+                out[mask_rgba] = (out[mask_rgba] - min_val) / (max_val - min_val)
         result = (out * 255).astype(np.uint8)[::-1, ...]
 
         self._ctx.disable(cast(int, mgl.BLEND))

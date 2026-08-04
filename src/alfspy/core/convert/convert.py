@@ -34,10 +34,50 @@ This information allows a generic definition of origin conversion.
 """
 
 
+def _to_top_left(x: ArrayLike, y: ArrayLike, max_x: Number, max_y: Number,
+                 origin: tuple[float, float, bool, bool]) -> tuple[ArrayLike, ArrayLike]:
+    """
+    Converts coordinates expressed in the given origin into top-left coordinates.
+    :param x: The x-coordinate in the source origin.
+    :param y: The y-coordinate in the source origin.
+    :param max_x: The maximum index along the x-axis.
+    :param max_y: The maximum index along the y-axis.
+    :param origin: The source origin's lookup tuple.
+    :return: The equivalent top-left coordinates.
+    """
+    offset_x, offset_y, points_right, points_up = origin
+    return (offset_x * max_x + (x if points_right else -x),
+            offset_y * max_y + (-y if points_up else y))
+
+
+def _from_top_left(x: ArrayLike, y: ArrayLike, max_x: Number, max_y: Number,
+                   origin: tuple[float, float, bool, bool]) -> tuple[ArrayLike, ArrayLike]:
+    """
+    Converts top-left coordinates into coordinates expressed in the given origin.
+    :param x: The top-left x-coordinate.
+    :param y: The top-left y-coordinate.
+    :param max_x: The maximum index along the x-axis.
+    :param max_y: The maximum index along the y-axis.
+    :param origin: The target origin's lookup tuple.
+    :return: The equivalent coordinates in the target origin.
+    """
+    offset_x, offset_y, points_right, points_up = origin
+    shifted_x = x - offset_x * max_x
+    shifted_y = y - offset_y * max_y
+    return (shifted_x if points_right else -shifted_x,
+            -shifted_y if points_up else shifted_y)
+
+
 def change_pixel_origin(x: ArrayLike, y: ArrayLike, max_x: Number, max_y: Number, from_origin: PixelOrigin,
                         to_origin: PixelOrigin) -> tuple[ArrayLike, ArrayLike]:
     """
     Converts the given pixel coordinates from one common image origin to another.
+
+    The conversion routes through top-left coordinates. The previous implementation
+    translated first and negated afterwards, which made the function asymmetric: converting
+    to an origin whose axes point the other way and back left a residual of
+    ``2 * max * offset``. Round-tripping is now exact for every origin pair.
+
     :param x: The x-coordinate of the pixel.
     :param y: The y-coordinate of the pixel.
     :param max_x: The maximum index along the x-axis.
@@ -47,22 +87,8 @@ def change_pixel_origin(x: ArrayLike, y: ArrayLike, max_x: Number, max_y: Number
     :return: A tuple containing converted coordinates ``(x, y)``.
     """
     lookup = _POT_LOOKUP
-    x_tf, y_tf, p_xa_tf, p_ya_tf = lookup[from_origin]
-    x_tt, y_tt, p_xa_tt, p_ya_tt = lookup[to_origin]
-
-    x_tr = x_tt - x_tf
-    y_tr = y_tt - y_tf
-
-    n_x = x - max_x * x_tr
-    n_y = y - max_y * y_tr
-
-    if p_xa_tf != p_xa_tt:
-        n_x *= -1.0
-
-    if p_ya_tf != p_ya_tt:
-        n_y *= -1.0
-
-    return n_x, n_y
+    top_left_x, top_left_y = _to_top_left(x, y, max_x, max_y, lookup[from_origin])
+    return _from_top_left(top_left_x, top_left_y, max_x, max_y, lookup[to_origin])
 
 
 def undistort_coords(x: ArrayLike, y: ArrayLike, distortion: Distortion,
@@ -169,15 +195,22 @@ def world_to_pixel_coord(coordinates: Union[ArrayLike, Sequence[ArrayLike]],
     :param viewport_origin: The origin of the viewport (defaults to top left).
     :return: The pixel coordinates of the projected world coordinates.
     """
-    coordinates = np.reshape(coordinates, (-1, 3))
+    coordinates = np.reshape(np.asarray(coordinates, dtype=np.float64), (-1, 3))
     x = coordinates[:, 0]
     y = coordinates[:, 1]
     z = coordinates[:, 2]
 
     homo_coords = np.stack((x, y, z, np.ones_like(x)), axis=-1)
-    camera_coords = np.dot(homo_coords, camera.get_view())
-    ndc_coords = np.dot(camera_coords, camera.get_proj())
-    ndc_coords_norm = ndc_coords / ndc_coords[:, 3]
+    camera_coords = np.dot(homo_coords, np.asarray(camera.get_view(), dtype=np.float64))
+    ndc_coords = np.dot(camera_coords, np.asarray(camera.get_proj(), dtype=np.float64))
+
+    # Divide each point by its *own* w. The previous `ndc_coords / ndc_coords[:, 3]` divided
+    # an (N, 4) array by an (N,) one, which only broadcasts when N is 1 or 4 -- and even at
+    # N == 4 it produced `clip[i, j] / w[j]`, dividing every point by the first point's
+    # depth. Orthographic cameras leave every w at 1.0, so the error was invisible there.
+    w = ndc_coords[:, 3:4]
+    w = np.where(np.abs(w) < np.finfo(np.float64).tiny, 1.0, w)
+    ndc_coords_norm = ndc_coords / w
 
     # convert normalized coordinates to top-left oriented pixel coordinates
     pixel_xs = (ndc_coords_norm[:, 0] + 1.0) * width / 2.0
@@ -189,10 +222,6 @@ def world_to_pixel_coord(coordinates: Union[ArrayLike, Sequence[ArrayLike]],
     if ensure_int:
         pixel_xs = np.floor(pixel_xs + 0.5).astype(int)
         pixel_ys = np.floor(pixel_ys + 0.5).astype(int)
-
-    if len(coordinates.shape) <= 1:
-        pixel_xs = pixel_xs[0]
-        pixel_ys = pixel_ys[0]
 
     return pixel_xs, pixel_ys
 
@@ -234,13 +263,13 @@ def world_to_pixel_coord2(
     if n == 0:
         return [None]
 
-    # Stack and bring into camera space: p_cam = R^T (p - t)
-    # camera.transform.rotation.matrix33: world->camera is R^T
-    # camera.transform.position: t (world)
+    # Bring the points into camera space. pyrr is a row-vector library, so `v @ R33` rotates
+    # camera-space into world-space; the world-to-camera direction therefore needs the
+    # transpose. The previous code used `@ R`, the wrong direction.
     P_world = np.stack([px, py, pz], axis=-1)
-    t = np.asarray(camera.transform.position)
-    R = np.asarray(camera.transform.rotation.matrix33)
-    P_cam = (P_world - t) @ R  # (R is world->camera if you dot with R, since you used n_ray_dirs @ R.T earlier)
+    t = np.asarray(camera.transform.position, dtype=np.float64)
+    R = np.asarray(camera.transform.rotation.matrix33, dtype=np.float64)
+    P_cam = (P_world - t) @ R.T
 
     x_c = P_cam[..., 0]
     y_c = P_cam[..., 1]
@@ -254,17 +283,16 @@ def world_to_pixel_coord2(
     y_px = np.full_like(y_c, np.nan, dtype=float)
 
     if camera.orthogonal:
-        # Orthographic inverse consistent with your forward code:
-        # forward used origin_offset_x = (ndc_x * img_plane_width) / width, with ray_origins = pos + R @ [ox, oy, 0]
-        # That implies: ndc_x = (x_c * width) / img_plane_width,  ndc_y = (y_c * height) / img_plane_height
-        img_plane_w, img_plane_h = camera.orthogonal_size  # same tuple you used
+        # Inverse of the (corrected) forward mapping in `pixel_to_world_coord`:
+        #   origin_offset_x = ndc_x * img_plane_width / 2   =>   ndc_x = 2 * x_c / img_plane_width
+        img_plane_w, img_plane_h = camera.orthogonal_size
         # Avoid division by zero
         eps = 1e-12
         img_plane_w = max(float(img_plane_w), eps)
         img_plane_h = max(float(img_plane_h), eps)
 
-        ndc_x = (x_c * width) / img_plane_w
-        ndc_y = (y_c * height) / img_plane_h
+        ndc_x = (2.0 * x_c) / img_plane_w
+        ndc_y = (2.0 * y_c) / img_plane_h
 
         # Map NDC -> pixels (origin top-left, +y down)
         x_px_ideal = (ndc_x + 1.0) * 0.5 * width
@@ -358,30 +386,44 @@ def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, me
     ndc_x = (2.0 * x / width) - 1.0
     ndc_y = 1.0 - (2.0 * y / height)
 
-    if camera.orthogonal:
-        # TODO: fix and test
-        # the ray direction is parallel to the camera forward vector
-        ray_dirs = np.array([camera.transform.forward] * count)
+    # pyrr is a row-vector library, so `v @ R33` is the camera-to-world rotation -- the same
+    # one `Transform.forward` uses. The previous code multiplied by `R33.T`, i.e. the inverse,
+    # which made the centre ray point opposite to where the camera actually faced. That was
+    # cancelled downstream by ProjectionScene negating its Euler angles; both halves were
+    # fixed together. See docs/pyrr_conventions.md.
+    rotation = np.asarray(camera.transform.rotation.matrix33, dtype=np.float64)
+    camera_position = np.asarray(camera.transform.position, dtype=np.float64)
 
-        # the ray origin lies on the same plane as the camera but is offset by the pixels distance on the image plane
+    if camera.orthogonal:
+        # The ray direction is parallel to the camera forward vector.
+        forward = np.asarray(camera.transform.forward, dtype=np.float64)
+        ray_dirs = np.broadcast_to(forward, (count, 3))
+
+        # The ray origin lies on the camera plane, offset by the pixel's position on the
+        # image plane. `ndc_x` is already normalised to [-1, 1], so it scales by half the
+        # frustum size; the previous code divided by `width`/`height` a second time, which
+        # collapsed every ray onto the camera axis.
         img_plane_width, img_plane_height = camera.orthogonal_size
-        origin_offset_x = (ndc_x * img_plane_width) / width
-        origin_offset_y = (ndc_y * img_plane_height) / height
-        origin_offset = np.array([origin_offset_x, origin_offset_y, np.zeros_like(x)])
-        ray_origins = camera.transform.position + camera.transform.rotation @ origin_offset
+        origin_offset = np.stack((
+            ndc_x * img_plane_width / 2.0,
+            ndc_y * img_plane_height / 2.0,
+            np.zeros_like(ndc_x),
+        ), axis=-1)
+
+        ray_origins = camera_position + np.dot(origin_offset, rotation)
     else:  # camera has a perspective projection
         # the ray direction is the projection of the pixel coordinates onto the image plane
         tan_fov_y = np.tan(np.deg2rad(camera.fovy) / 2.0)
         n_ray_dirs = np.stack((
             ndc_x * camera.aspect_ratio * tan_fov_y,  # account for fov x via aspect ratio (more efficient)
             ndc_y * tan_fov_y,
-            np.full_like(x, -1.0)  # the camera looks along the negative z-axis
+            np.full_like(ndc_x, -1.0)  # the camera looks along the negative z-axis
         ), axis=-1)
 
-        ray_dirs = np.dot(n_ray_dirs, camera.transform.rotation.matrix33.T)
+        ray_dirs = np.dot(n_ray_dirs, rotation)
 
         # the ray origin is the same as the camera origin
-        ray_origins = np.array([camera.transform.position] * count)
+        ray_origins = np.broadcast_to(camera_position, (count, 3))
 
     res = cast_ray(ray_origins, ray_dirs, mesh, include_misses=include_misses)
     return res
