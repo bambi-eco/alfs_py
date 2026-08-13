@@ -19,7 +19,7 @@ from .context import (
     create_context,
 )
 from .framebuffer import TorchFramebuffer
-from .programs import shade_object, shade_shot, shot_clip_coords
+from .programs import shade_object, shade_shot, shade_shot_projected, shot_clip_coords
 from .raster import (
     DEFAULT_SAMPLE_BUDGET,
     Fragments,
@@ -55,6 +55,7 @@ __all__ = [
     'setup_triangles',
     'shade_object',
     'shade_shot',
+    'shade_shot_projected',
     'shot_clip_coords',
     'to_numpy',
     'transform_vertices',

@@ -312,3 +312,60 @@ def test_sample_budget_does_not_change_the_result():
     assert torch.equal(generous.pixel_index, stingy.pixel_index)
     assert torch.equal(generous.tri_index, stingy.tri_index)
     np.testing.assert_allclose(generous.bary.numpy(), stingy.bary.numpy(), atol=1e-6)
+
+
+# ─────────────────────────────── bucket batching ────────────────────────────
+
+
+@pytest.mark.parametrize('boxes', [
+    # (x0, y0, x1, y1), inclusive. Shapes chosen to exercise the merge policy:
+    # many identical small boxes, a few odd ones, and one very large box.
+    [(0, 0, 7, 7)] * 200,
+    [(0, 0, 7, 8)] * 200 + [(0, 0, 0, 0)] * 50 + [(0, 0, 63, 2)] * 3,
+    [(i, i, i + (i % 13), i + (i % 7)) for i in range(500)],
+    [(0, 0, 1023, 1023)],
+])
+@pytest.mark.parametrize('budget', [64, 4096, 1 << 21])
+def test_bucket_batches_partition_every_triangle(boxes, budget):
+    """
+    Each triangle must appear in exactly one batch, and its box must fit the batch's grid.
+
+    The batching loop is greedy and has several cut conditions; a triangle silently dropped
+    here would vanish from the render rather than raise.
+    """
+    from alfspy.core.torchgl.raster import _bucket_batches
+
+    bbox = torch.tensor(boxes, dtype=torch.int64)
+    batches = _bucket_batches(bbox, budget)
+
+    seen = torch.cat([b[0] for b in batches]) if batches else torch.zeros(0, dtype=torch.int64)
+    assert sorted(seen.tolist()) == list(range(len(boxes))), 'batches do not partition the triangles'
+
+    for indices, grid_w, grid_h in batches:
+        assert indices.numel() > 0
+        widths = bbox[indices, 2] - bbox[indices, 0] + 1
+        heights = bbox[indices, 3] - bbox[indices, 1] + 1
+        assert int(widths.max()) <= grid_w, 'a box is wider than its batch grid'
+        assert int(heights.max()) <= grid_h, 'a box is taller than its batch grid'
+        # A batch may exceed the budget only when it holds a single oversized box.
+        if indices.numel() > 1:
+            assert indices.numel() * grid_w * grid_h <= budget
+
+
+def test_bucket_batches_are_tight_for_a_uniform_dem():
+    """
+    The regular grid an orthographic DEM produces must cost no more candidate samples than
+    its bounding boxes need. This is the case the square power-of-two bucketing inflated by
+    2.6x, which was the rasteriser's single largest source of wasted work.
+    """
+    from alfspy.core.torchgl.raster import _bucket_batches
+
+    mesh = height_field(resolution=32, half=25.0)
+    camera = ortho_camera_above(size=(50.0, 50.0), height=30.0)
+    setup, _ = rasterise(mesh, camera, 256, 256)
+
+    bbox = setup.bbox
+    exact = int(((bbox[:, 2] - bbox[:, 0] + 1) * (bbox[:, 3] - bbox[:, 1] + 1)).sum())
+    candidates = sum(i.numel() * w * h for i, w, h in _bucket_batches(bbox, 1 << 21))
+
+    assert candidates <= 1.1 * exact, f'{candidates} candidates for {exact} bounding-box samples'

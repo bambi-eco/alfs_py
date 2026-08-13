@@ -33,7 +33,7 @@ from alfspy.core.torchgl import (
     resolve_depth,
     setup_triangles,
     shade_object,
-    shade_shot,
+    shade_shot_projected,
     shot_clip_coords,
     transform_vertices,
 )
@@ -110,6 +110,8 @@ class Renderer:
         self._world_positions: Optional[torch.Tensor] = None
         # (depth_test, cull_mode, fragments) for the current camera and model transform.
         self._raster_cache: Optional[tuple] = None
+        # Per-fragment world positions matching ``_raster_cache``; see ``_fragment_world``.
+        self._frag_world: Optional[torch.Tensor] = None
 
         self.camera = camera
         self.apply_matrices()
@@ -153,6 +155,7 @@ class Renderer:
         self._proj_mat = as_matrix(self.camera.get_proj(), device, dtype)
         self._world_positions = transform_vertices(self._obj.vertices, self._model_mat)
         self._raster_cache = None
+        self._frag_world = None
 
     def release(self) -> None:
         """
@@ -167,6 +170,7 @@ class Renderer:
             self._fbo.release()
             self._world_positions = None
             self._raster_cache = None
+            self._frag_world = None
             self._released = True
 
     # region rasterisation
@@ -192,6 +196,7 @@ class Renderer:
         if cached is not None and cached[0] == depth_test and cached[1] == self._ctx.culling:
             return cached[2]
 
+        self._frag_world = None
         width, height = self._resolution.as_tuple()
         mvp = self._model_mat @ self._view_mat @ self._proj_mat
         clip = transform_vertices(self._obj.vertices, mvp)
@@ -209,6 +214,31 @@ class Renderer:
         self._raster_cache = (depth_test, self._ctx.culling, fragments)
         return fragments
 
+    def _fragment_world(self, fragments: Fragments) -> torch.Tensor:
+        """
+        Returns the world-space position of every fragment, interpolating on first use.
+
+        This is the per-shot loop's hot path. Projecting a shot needs its clip coordinates at
+        each fragment, which the GL shader obtained by interpolating a per-vertex varying.
+        Doing that per shot means an ``(N, 3, 4)`` gather over a million fragments for every
+        one of them. Interpolating the *world* position once instead and multiplying it by
+        each shot's matrix gives the identical result -- see
+        :func:`~alfspy.core.torchgl.programs.shade_shot_projected` for why -- at the cost of
+        one matmul per shot.
+
+        The cache is tied to the rasterisation and dropped whenever that is.
+
+        :param fragments: The fragments to interpolate at.
+        :return: ``(N, 4)`` per-fragment world positions.
+        """
+        cached = self._frag_world
+        if cached is not None and cached.shape[0] == len(fragments):
+            return cached
+
+        world = fragments.interpolate(self._world_positions, self._obj.triangles)
+        self._frag_world = world
+        return world
+
     def invalidate_raster_cache(self) -> None:
         """
         Drops the cached rasterisation, freeing its memory.
@@ -217,6 +247,7 @@ class Renderer:
         automatically whenever the camera or model transform changes.
         """
         self._raster_cache = None
+        self._frag_world = None
 
     def _write(self, pixel_index: torch.Tensor, colour: torch.Tensor, additive: bool) -> None:
         """
@@ -263,14 +294,20 @@ class Renderer:
         if mask is not None:
             self._mask_tex = TorchTexture(mask.texture, device=self._ctx.device, dtype=self._ctx.dtype)
 
-    def _shot_clip(self, shot: CtxShot) -> torch.Tensor:
+    def _shot_clip(self, shot: CtxShot, positions: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         :param shot: The shot to compute clip coordinates for.
-        :return: ``(V, 4)`` per-vertex coordinates in the shot camera's clip space.
+        :param positions: The world-space positions to transform (optional; defaults to the
+            mesh vertices). The renderer passes per-*fragment* positions, which is valid
+            because the transform is linear -- see
+            :func:`~alfspy.core.torchgl.programs.shade_shot_projected`.
+        :return: ``(N, 4)`` coordinates in the shot camera's clip space.
         """
         device, dtype = self._ctx.device, self._ctx.dtype
+        if positions is None:
+            positions = self._world_positions
         return shot_clip_coords(
-            self._world_positions,
+            positions,
             as_matrix(shot.get_view(), device, dtype),
             as_matrix(shot.get_correction(), device, dtype),
             as_matrix(shot.get_proj(), device, dtype),
@@ -288,16 +325,15 @@ class Renderer:
         if not len(fragments):
             return
 
-        shot_clip = self._shot_clip(shot)
+        clip = self._shot_clip(shot, self._fragment_world(fragments))
         texture = shot.get_texture(self._ctx)
 
-        colour, keep = shade_shot(fragments, shot_clip, self._obj.triangles, texture,
-                                  self._mask_tex,
-                                  reject_behind_camera=self._ctx.reject_behind_camera)
+        colour, keep = shade_shot_projected(clip, texture, self._mask_tex,
+                                            reject_behind_camera=self._ctx.reject_behind_camera)
         if colour.numel() == 0:
             return
 
-        self._write(fragments.pixel_index[keep], colour, additive=additive)
+        self._write(fragments.pixel_index.index_select(0, keep), colour, additive=additive)
 
     def _psi_complete_view(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         background = self.render_background()

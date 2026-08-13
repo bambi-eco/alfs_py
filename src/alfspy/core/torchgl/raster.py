@@ -11,11 +11,16 @@ Design notes
 *Matrices are in pyrr's row-vector convention* -- clip coordinates are ``v_row @ MVP``.
 See ``docs/pyrr_conventions.md``.
 
-*Coverage uses bucketed binning.* Triangles are grouped by the power-of-two side of their
-screen bounding box, so each group expands to a dense ``s x s`` candidate grid in one
-broadcast instead of a ragged gather. Groups are processed in chunks bounded by a sample
-budget, which keeps peak memory independent of both mesh size and the triangle size
-distribution.
+*Coverage uses bucketed binning.* Triangles are grouped by the shape of their screen
+bounding box, so each group expands to a dense ``w x h`` candidate grid in one broadcast
+instead of a ragged gather. Groups are processed in chunks bounded by a sample budget, which
+keeps peak memory independent of both mesh size and the triangle size distribution. Grouping
+by the *exact* box shape rather than a rounded-up square matters more than it looks: see
+:func:`_bucket_batches`.
+
+*Barycentric weights are computed after compaction, not over the candidate grid*, and
+:func:`resolve_depth` skips the perspective-correct ones entirely because it recomputes the
+surviving fragments' weights once the depth test has picked them.
 
 *Depth resolution is a single scatter-min over packed int64 keys*
 (``key = (quantised_depth << 32) | triangle_index``). One pass resolves both the nearest
@@ -51,6 +56,9 @@ _INT64_MAX: int = torch.iinfo(torch.int64).max
 
 _W_EPSILON: float = 1e-7
 
+_SHAPE_KEY_MASK: int = (1 << 32) - 1
+"""Low half of the ``(height, width)`` key :func:`_bucket_batches` sorts bounding boxes by."""
+
 
 @dataclass
 class Fragments:
@@ -61,9 +69,9 @@ class Fragments:
         (row ``0`` is the bottom, as in GL).
     :cvar tri_index: ``(N,)`` index of the triangle covering each fragment.
     :cvar bary: ``(N, 3)`` perspective-correct barycentric coordinates, ready for attribute
-        interpolation.
+        interpolation. Empty when the chunk was produced with ``need_bary=False``.
     :cvar bary_screen: ``(N, 3)`` screen-space (non perspective-corrected) barycentrics, used
-        for depth interpolation.
+        for depth interpolation. Empty when the chunk was produced with ``need_bary=False``.
     :cvar depth: ``(N,)`` interpolated NDC depth in ``[-1, 1]``.
     """
     pixel_index: torch.Tensor
@@ -314,18 +322,112 @@ def _empty_setup(device: torch.device, dtype: torch.dtype) -> TriangleSetup:
     )
 
 
-def _bucket_sides(bbox: torch.Tensor) -> torch.Tensor:
+_MAX_BUCKET_WASTE: float = 1.5
+"""How much larger than a triangle's own bounding box its candidate grid may get when
+triangles of differing sizes are merged into one batch."""
+
+_MIN_BATCH_SAMPLES: int = 1 << 18
+"""Candidate samples a batch must reach before :data:`_MAX_BUCKET_WASTE` may split it.
+
+Every batch costs a fixed number of tensor dispatches regardless of how few triangles it
+holds, so splitting to save arithmetic is only worth it once there is enough arithmetic to
+save. Without this floor a tilted perspective view -- which produces hundreds of distinct
+box shapes -- fragments into dozens of batches of a couple of dozen triangles each, and the
+dispatch overhead costs more than the wasted samples ever did."""
+
+
+def _bucket_batches(bbox: torch.Tensor, sample_budget: int) -> list[tuple[torch.Tensor, int, int]]:
     """
+    Groups triangles into batches that can share a single dense candidate grid.
+
+    Coverage is evaluated by expanding each triangle to a rectangular grid of candidate
+    samples, so every sample the grid holds beyond the triangle's own bounding box is wasted
+    work. An earlier version rounded the *longer* box side up to a power of two and used a
+    square grid of that side, which cost 1.9x to 2.7x more candidates than the boxes actually
+    needed: a DEM triangle spanning 9 pixels was rasterised on a 16x16 grid.
+
+    Grouping by the exact box shape removes that overhead entirely. Real meshes produce few
+    distinct shapes -- an orthographic DEM produces about four -- but a tilted perspective
+    view can produce a few hundred, and one dispatch per shape would trade the saved
+    arithmetic for Python overhead. So shapes are sorted by ``(height, width)``, which puts
+    similar ones next to each other, and adjacent shapes are merged while the merged grid
+    stays within :data:`_MAX_BUCKET_WASTE` of the smallest box in the batch -- a limit that
+    only starts applying once the batch holds :data:`_MIN_BATCH_SAMPLES` candidates, so that
+    small shapes never split into batches too thin to be worth dispatching.
+
+    Every triangle lands in exactly one batch, and its box always fits inside that batch's
+    grid; :func:`_rasterise_batch` masks off the samples that overhang its own box.
+
     :param bbox: ``(T, 4)`` inclusive pixel bounding boxes.
-    :return: ``(T,)`` power-of-two side length covering each bounding box.
+    :param sample_budget: Maximum candidate samples a single batch may materialise.
+    :return: A list of ``(triangle_indices, grid_width, grid_height)`` batches.
     """
-    span = torch.maximum(bbox[:, 2] - bbox[:, 0], bbox[:, 3] - bbox[:, 1]) + 1
-    # 2 ** ceil(log2(span)), computed exactly in integer arithmetic.
-    return torch.pow(2, torch.ceil(torch.log2(span.to(torch.float64))).to(torch.int64)).to(torch.int64)
+    widths = bbox[:, 2] - bbox[:, 0] + 1
+    heights = bbox[:, 3] - bbox[:, 1] + 1
+
+    # Sort by (height, width) so equal shapes are contiguous and neighbours are similar.
+    # `stable=True` keeps the batching -- and therefore the fragment order -- reproducible.
+    key = (heights << 32) | widths
+    order = torch.argsort(key, stable=True)
+
+    unique_keys, counts = torch.unique_consecutive(key[order], return_counts=True)
+
+    # One host round-trip; the loop below runs over distinct shapes, not triangles.
+    shape_w = (unique_keys & _SHAPE_KEY_MASK).tolist()
+    shape_h = (unique_keys >> 32).tolist()
+    shape_n = counts.tolist()
+
+    budget = max(1, int(sample_budget))
+    batches: list[tuple[torch.Tensor, int, int]] = []
+
+    start = 0          # offset into `order` of the current batch
+    taken = 0          # triangles already in the current batch
+    grid_w = grid_h = 0
+    smallest = 0       # smallest exact box area in the current batch
+
+    def flush(end: int) -> None:
+        if end > start:
+            batches.append((order[start:end], grid_w, grid_h))
+
+    cursor = 0
+    for width, height, count in zip(shape_w, shape_h, shape_n):
+        area = width * height
+        remaining = count
+        while remaining:
+            new_w = max(grid_w, width)
+            new_h = max(grid_h, height)
+            new_smallest = min(smallest, area) if taken else area
+
+            # Merging this shape in must not dilute the batch beyond the waste limit -- but
+            # only once the batch is big enough that a separate dispatch would pay for itself.
+            if (taken * new_w * new_h >= _MIN_BATCH_SAMPLES
+                    and new_w * new_h > _MAX_BUCKET_WASTE * new_smallest):
+                flush(cursor)
+                start, taken, grid_w, grid_h, smallest = cursor, 0, 0, 0, 0
+                continue
+
+            room = budget // (new_w * new_h) - taken
+            if room <= 0:
+                if taken:
+                    flush(cursor)
+                    start, taken, grid_w, grid_h, smallest = cursor, 0, 0, 0, 0
+                    continue
+                # A single box larger than the whole budget still has to be rasterised.
+                room = 1
+
+            step = min(remaining, room)
+            grid_w, grid_h, smallest = new_w, new_h, new_smallest
+            taken += step
+            cursor += step
+            remaining -= step
+
+    flush(cursor)
+    return batches
 
 
 def iter_fragments(setup: TriangleSetup, width: int, height: int,
-                   sample_budget: int = DEFAULT_SAMPLE_BUDGET) -> Iterator[Fragments]:
+                   sample_budget: int = DEFAULT_SAMPLE_BUDGET,
+                   need_bary: bool = True) -> Iterator[Fragments]:
     """
     Yields chunks of covered fragments for every triangle in ``setup``.
 
@@ -337,6 +439,10 @@ def iter_fragments(setup: TriangleSetup, width: int, height: int,
     :param width: Viewport width in pixels.
     :param height: Viewport height in pixels.
     :param sample_budget: Maximum candidate samples materialised per chunk.
+    :param need_bary: Whether perspective-correct barycentrics are wanted. :func:`resolve_depth`
+        passes ``False``: it keeps only one fragment per pixel and recomputes their weights
+        afterwards, so computing them for every covered sample first is pure waste. The
+        ``bary`` and ``bary_screen`` fields of the yielded chunks are then empty.
     :return: An iterator over :class:`Fragments` chunks.
     """
     if len(setup) == 0:
@@ -345,24 +451,15 @@ def iter_fragments(setup: TriangleSetup, width: int, height: int,
     device = setup.screen.device
     dtype = setup.screen.dtype
 
-    sides = _bucket_sides(setup.bbox)
-
-    for side in torch.unique(sides).tolist():
-        side = int(side)
-        selection = torch.nonzero(sides == side, as_tuple=False).squeeze(1)
-        samples_per_tri = side * side
-        chunk = max(1, int(sample_budget) // samples_per_tri)
-
-        offsets = torch.arange(side, device=device, dtype=torch.int64)
-        off_y, off_x = torch.meshgrid(offsets, offsets, indexing='ij')
-        off_x = off_x.reshape(-1)                                       # (side*side,)
-        off_y = off_y.reshape(-1)
-
-        for start in range(0, selection.numel(), chunk):
-            batch = selection[start:start + chunk]
-            fragments = _rasterise_batch(setup, batch, off_x, off_y, width, height, device, dtype)
-            if fragments is not None:
-                yield fragments
+    for batch, grid_w, grid_h in _bucket_batches(setup.bbox, sample_budget):
+        off_y, off_x = torch.meshgrid(
+            torch.arange(grid_h, device=device, dtype=torch.int64),
+            torch.arange(grid_w, device=device, dtype=torch.int64),
+            indexing='ij')
+        fragments = _rasterise_batch(setup, batch, off_x.reshape(-1), off_y.reshape(-1),
+                                     width, height, device, dtype, need_bary)
+        if fragments is not None:
+            yield fragments
 
 
 def _covers(edge_value: torch.Tensor, edge_dx: torch.Tensor, edge_dy: torch.Tensor,
@@ -403,12 +500,11 @@ def _covers(edge_value: torch.Tensor, edge_dx: torch.Tensor, edge_dy: torch.Tens
 def _rasterise_batch(setup: TriangleSetup, batch: torch.Tensor,
                      off_x: torch.Tensor, off_y: torch.Tensor,
                      width: int, height: int,
-                     device: torch.device, dtype: torch.dtype) -> Optional[Fragments]:
+                     device: torch.device, dtype: torch.dtype,
+                     need_bary: bool = True) -> Optional[Fragments]:
     """Rasterises one bucket chunk. Returns ``None`` when nothing is covered."""
     bbox = setup.bbox[batch]                                            # (K, 4)
-    screen = setup.screen[batch]                                        # (K, 3, 2)
     depth = setup.depth[batch]                                          # (K, 3)
-    inv_w = setup.inv_w[batch]                                          # (K, 3)
 
     px = bbox[:, 0:1] + off_x.unsqueeze(0)                              # (K, S)
     py = bbox[:, 1:2] + off_y.unsqueeze(0)
@@ -437,11 +533,6 @@ def _rasterise_batch(setup: TriangleSetup, batch: torch.Tensor,
 
     e0, e1, e2 = values
     total = e0 + e1 + e2
-    safe_total = torch.where(total == 0, torch.ones_like(total), total)
-
-    l0 = e0 / safe_total
-    l1 = e1 / safe_total
-    l2 = e2 / safe_total
 
     inside = in_bbox & (total != 0)
     for edge, value in enumerate(values):
@@ -451,33 +542,55 @@ def _rasterise_batch(setup: TriangleSetup, batch: torch.Tensor,
                                   delta[:, edge, 1:2] * oriented,
                                   area)
 
-    frag_depth = l0 * depth[:, 0:1] + l1 * depth[:, 1:2] + l2 * depth[:, 2:3]
-    inside = inside & (frag_depth >= -1.0) & (frag_depth <= 1.0)
-
     hit = torch.nonzero(inside, as_tuple=False)
     if hit.numel() == 0:
         return None
 
     rows, cols = hit[:, 0], hit[:, 1]
 
-    sel_px = px[rows, cols]
-    sel_py = py[rows, cols]
-    pixel_index = sel_py * width + sel_px
+    # Barycentrics are wanted only where the triangle actually covers the sample, which is
+    # well under half the candidate grid. Computing them after compaction rather than over
+    # the dense grid is the same arithmetic on a fraction of the elements.
+    safe_total = total[rows, cols]
+    safe_total = torch.where(safe_total == 0, torch.ones_like(safe_total), safe_total)
+    l0 = e0[rows, cols] / safe_total
+    l1 = e1[rows, cols] / safe_total
+    l2 = e2[rows, cols] / safe_total
 
-    bary_screen = torch.stack((l0[rows, cols], l1[rows, cols], l2[rows, cols]), dim=1)
+    frag_depth = l0 * depth[rows, 0] + l1 * depth[rows, 1] + l2 * depth[rows, 2]
 
-    # Perspective correction: weight by 1/w and renormalise.
-    weights = bary_screen * inv_w[rows]
-    weight_sum = weights.sum(dim=1, keepdim=True)
-    weight_sum = torch.where(weight_sum == 0, torch.ones_like(weight_sum), weight_sum)
-    bary = weights / weight_sum
+    # Near/far rejection. Whole triangles outside the range are already gone; this catches
+    # the fragments of a triangle that only partly straddles it.
+    in_range = (frag_depth >= -1.0) & (frag_depth <= 1.0)
+    if not bool(in_range.all()):
+        keep = torch.nonzero(in_range, as_tuple=False).squeeze(1)
+        if keep.numel() == 0:
+            return None
+        rows = rows.index_select(0, keep)
+        cols = cols.index_select(0, keep)
+        l0 = l0.index_select(0, keep)
+        l1 = l1.index_select(0, keep)
+        l2 = l2.index_select(0, keep)
+        frag_depth = frag_depth.index_select(0, keep)
+
+    pixel_index = py[rows, cols] * width + px[rows, cols]
+
+    if need_bary:
+        bary_screen = torch.stack((l0, l1, l2), dim=1)
+        # Perspective correction: weight by 1/w and renormalise.
+        weights = bary_screen * setup.inv_w[batch][rows]
+        weight_sum = weights.sum(dim=1, keepdim=True)
+        weight_sum = torch.where(weight_sum == 0, torch.ones_like(weight_sum), weight_sum)
+        bary = weights / weight_sum
+    else:
+        bary = bary_screen = torch.zeros((0, 3), device=device, dtype=dtype)
 
     return Fragments(
         pixel_index=pixel_index,
         tri_index=setup.tri_index[batch][rows],
         bary=bary,
         bary_screen=bary_screen,
-        depth=frag_depth[rows, cols],
+        depth=frag_depth,
     )
 
 
@@ -524,7 +637,9 @@ def resolve_depth(setup: TriangleSetup, width: int, height: int,
 
     buffer = torch.full((height * width,), _INT64_MAX, device=device, dtype=torch.int64)
 
-    for fragments in iter_fragments(setup, width, height, sample_budget):
+    # Only coverage, depth and triangle identity survive the depth test; the winners' weights
+    # are recomputed by ``_shade_winners`` below, so asking for them here would be wasted.
+    for fragments in iter_fragments(setup, width, height, sample_budget, need_bary=False):
         keys = _pack_key(fragments.depth, fragments.tri_index)
         scatter_min_(buffer, fragments.pixel_index, keys)
 
