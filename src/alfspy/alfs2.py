@@ -22,7 +22,7 @@ from alfspy.core.rendering import CtxShot, TextureData
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.renderer import Renderer
 from alfspy.core.util.geo import get_aabb
-from alfspy.core.util.pyrrs import quaternion_from_eulers
+from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import (
     make_camera,
@@ -104,8 +104,7 @@ def make_shot(ctx, image_path: str, pose: dict, fovy_default: float) -> CtxShot:
     rot = pose["rotation"]
     rot = [v % 360.0 for v in rot]
     if len(rot) == 3:
-        eulers = [np.deg2rad(v) for v in rot]
-        camera_rotation = quaternion_from_eulers(eulers, "zyx")
+        camera_rotation = quaternion_from_drone_pose(rot)
     elif len(rot) == 4:
         camera_rotation = Quaternion(rot)
     else:

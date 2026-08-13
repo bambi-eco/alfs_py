@@ -11,7 +11,7 @@ from alfspy.core.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo import Transform
 from alfspy.core.rendering import Resolution, Camera, CtxShot
 from alfspy.core.util.geo import get_aabb
-from alfspy.core.util.pyrrs import quaternion_from_eulers
+from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.orthografic_projection import get_axis_aligned_bounding_box
 from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import read_gltf, process_render_data, make_camera, make_torch_context
@@ -32,8 +32,7 @@ def get_shots_for_files(ctx: TorchContext, mask, correction: Transform,
 
             rot_len = len(rotation)
             if rot_len == 3:
-                eulers = [np.deg2rad(val) for val in rotation]
-                rotation = quaternion_from_eulers(eulers, 'zyx')
+                rotation = quaternion_from_drone_pose(rotation)
             elif rot_len == 4:
                 rotation = Quaternion(rotation)
             else:

@@ -19,7 +19,7 @@ from alfspy.core.rendering.renderer import Renderer
 from alfspy.core.util.collections.cyclic import CyclicList
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.loggings import LoggerStep
-from alfspy.core.util.pyrrs import quaternion_from_eulers
+from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import make_camera, make_torch_context, make_shot_loader, process_render_data, read_gltf, release_all
 
@@ -77,8 +77,7 @@ def get_shots_for_files(image_files: List[str], images_folder: str, ctx: TorchCo
 
             rot_len = len(camera_rotation)
             if rot_len == 3:
-                eulers = [np.deg2rad(val) for val in camera_rotation]
-                camera_rotation = quaternion_from_eulers(eulers, 'zyx')
+                camera_rotation = quaternion_from_drone_pose(camera_rotation)
             elif rot_len == 4:
                 camera_rotation = Quaternion(camera_rotation)
             else:

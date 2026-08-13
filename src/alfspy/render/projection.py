@@ -68,7 +68,7 @@ from alfspy.core.rendering import (
 )
 from alfspy.core.rendering.renderer import Renderer
 from alfspy.core.util.geo import get_aabb
-from alfspy.core.util.pyrrs import quaternion_from_eulers
+from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import (
     make_camera,
@@ -313,7 +313,7 @@ class ProjectionScene:
         """
         rotation = [val % 360.0 for val in meta["rotation"]]
         if len(rotation) == 3:
-            return quaternion_from_eulers([np.deg2rad(v) for v in rotation], "zyx")
+            return quaternion_from_drone_pose(rotation)
         if len(rotation) == 4:
             return Quaternion(rotation)
         raise ValueError(f"Invalid rotation format of length {len(rotation)}: {rotation}")

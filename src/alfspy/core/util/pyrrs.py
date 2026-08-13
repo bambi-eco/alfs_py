@@ -124,3 +124,33 @@ def quaternion_from_eulers(eulers: Sequence[float], order: EulerOrder = 'xyz', d
         raise ValueError(f'Invalid rotation order "{order}"')
 
     return q
+
+
+def quaternion_from_drone_pose(rotation_deg: Sequence[float],
+                               dtype: object = None) -> Quaternion:
+    """
+    Converts a drone pose ``[tilt, roll, heading]`` in degrees into the camera's
+    rotation.
+
+    ``tilt`` is measured from nadir (``0`` looks straight down, ``90`` looks at the
+    horizon) and ``heading`` is clockwise from north.  The heading is a rotation
+    about **world up** and must be applied *after* the tilt.
+
+    Composing them the other way round -- which is what
+    ``quaternion_from_eulers(eulers, 'zyx')`` does, and what every caller in this
+    codebase used to do -- turns the heading into a rotation about the camera's own
+    optical axis.  The tilt then always leans the same way in world space and the
+    heading merely spins the image: ``[45, 0, 0]`` and ``[45, 0, 90]`` produce the
+    *identical* forward vector.  At nadir that is indistinguishable from the correct
+    result, which is why it survived years of top-down survey flights; at the horizon
+    it is 128 degrees wrong.
+
+    :param rotation_deg: The pose's ``[tilt, roll, heading]`` angles in degrees.
+    :param dtype: The data type to use for the Quaternion (optional).
+    :return: The camera-to-world rotation, in the same convention as
+        ``Transform.forward`` (i.e. ``forward = (0, 0, -1) @ q.matrix33``).
+    """
+    tilt, roll, heading = (np.deg2rad(v) for v in rotation_deg[0:3])
+    # Negating the tilt and composing in 'xyz' order is exactly
+    # R_z(-heading) @ R_x(tilt) transposed, i.e. heading about world up, last.
+    return quaternion_from_eulers([-tilt, roll, heading], 'xyz', dtype=dtype)
