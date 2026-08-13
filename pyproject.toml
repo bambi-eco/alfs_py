@@ -7,7 +7,7 @@ packages = ["src/alfspy"]
 
 [project]
 name = "AlfsPy"
-version = "2.0.0"
+version = "2.1.0"
 description = "Renderer for airborne light-field sampling data implemented via ModernGL"
 readme = "README.md"
 requires-python = "~=3.9"

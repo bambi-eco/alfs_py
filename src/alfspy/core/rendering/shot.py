@@ -13,7 +13,7 @@ from alfspy.core.rendering import Camera
 from alfspy.core.rendering import TextureData
 from alfspy.core.util.basic import get_first_valid
 from alfspy.core.util.defs import PATH_SEP
-from alfspy.core.util.pyrrs import quaternion_from_eulers
+from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 
 
 class CtxShot:
@@ -243,8 +243,7 @@ class CtxShot:
 
             rot_len = len(rotation)
             if rot_len == 3:
-                eulers = [deg2rad(val) for val in rotation]
-                rotation = quaternion_from_eulers(eulers, 'zyx')
+                rotation = quaternion_from_drone_pose(rotation)
             elif rot_len == 4:
                 rotation = Quaternion(rotation)
             else:
