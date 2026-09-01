@@ -4,7 +4,7 @@ from collections import defaultdict
 from copy import copy
 from functools import cache
 from logging import getLogger, Logger
-from typing import Optional, Iterable, Callable, Sequence, cast, Protocol, Union, TypeVar, Type, Final
+from typing import Optional, Iterable, Callable, Sequence, cast, Protocol, Union, TypeVar, Type, Final, TYPE_CHECKING
 
 import cv2
 import numpy as np
@@ -14,7 +14,12 @@ from pyrr import Quaternion, Vector3
 
 from alfspy.core.backends import make_context as backend_make_context
 from alfspy.core.backends import resolve_engine
-from alfspy.core.torchgl import TorchContext, create_context
+# TorchContext is used for annotations only, and ``alfspy.core.torchgl`` imports torch
+# at module level. Importing it eagerly would make torch a hard requirement of this
+# module, and so of every engine -- exactly what the optional backend extras exist to
+# avoid. The annotations that use it are strings for the same reason.
+if TYPE_CHECKING:  # pragma: no cover
+    from alfspy.core.torchgl import TorchContext
 from alfspy.core.geo.aabb import AABB
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.camera import Camera
@@ -178,7 +183,7 @@ def make_context(engine: Optional[str] = None, device: Optional[str] = None, **o
     return backend_make_context(engine, device=device, **options)
 
 
-def make_torch_context(device: Optional[str] = None, **kwargs) -> TorchContext:
+def make_torch_context(device: Optional[str] = None, **kwargs) -> 'TorchContext':
     """
     Deprecated. Use ``make_context('torch', device=...)``.
 
@@ -212,7 +217,7 @@ def make_mgl_context(standalone: bool = True, **kwargs):
     return make_context('moderngl', standalone=standalone, **kwargs)
 
 
-def read_shots(json_file: str, ctx: TorchContext, se: BaseSettings) -> list[CtxShot]:
+def read_shots(json_file: str, ctx, se: BaseSettings) -> list[CtxShot]:
     """
     Reads the shots from a JSON file and filters them according to the given settings.
     :param json_file: The shot JSON file.

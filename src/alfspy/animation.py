@@ -1,10 +1,15 @@
 import json
 import os
-from typing import List, Dict
+from typing import List, Dict, TYPE_CHECKING
 
 import cv2
 import numpy as np
-from alfspy.core.torchgl import TorchContext
+# TorchContext is used for annotations only, and ``alfspy.core.torchgl`` imports torch
+# at module level. Importing it eagerly would make torch a hard requirement of this
+# module, and so of every engine -- exactly what the optional backend extras exist to
+# avoid. The annotations that use it are strings for the same reason.
+if TYPE_CHECKING:  # pragma: no cover
+    from alfspy.core.torchgl import TorchContext
 from pyrr import Vector3, Quaternion
 from trimesh import Trimesh
 

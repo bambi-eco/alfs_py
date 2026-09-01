@@ -19,10 +19,15 @@ import os
 import json
 import re
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Tuple, Dict, Set, Any
+from typing import List, Optional, Tuple, Dict, Set, Any, TYPE_CHECKING
 from pathlib import Path
 import cv2
-from alfspy.core.torchgl import TorchContext
+# TorchContext is used for annotations only, and ``alfspy.core.torchgl`` imports torch
+# at module level. Importing it eagerly would make torch a hard requirement of this
+# module, and so of every engine -- exactly what the optional backend extras exist to
+# avoid. The annotations that use it are strings for the same reason.
+if TYPE_CHECKING:  # pragma: no cover
+    from alfspy.core.torchgl import TorchContext
 import numpy as np
 import logging
 import sys
@@ -224,7 +229,7 @@ def get_frame_correction(corrections_data: dict, frame_idx: int, central_frame_i
 def get_shots_for_files(
     image_files: List[str],
     images_folder: str,
-    ctx: TorchContext,
+    ctx: 'TorchContext',
     corrections_data: Dict[str, any],
     matched_poses: dict,
     fovy: float = 60.0,

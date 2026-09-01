@@ -3,10 +3,15 @@ from collections import defaultdict
 import os
 import json
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, TYPE_CHECKING
 from pathlib import Path
 import cv2
-from alfspy.core.torchgl import TorchContext
+# TorchContext is used for annotations only, and ``alfspy.core.torchgl`` imports torch
+# at module level. Importing it eagerly would make torch a hard requirement of this
+# module, and so of every engine -- exactly what the optional backend extras exist to
+# avoid. The annotations that use it are strings for the same reason.
+if TYPE_CHECKING:  # pragma: no cover
+    from alfspy.core.torchgl import TorchContext
 import numpy as np
 
 from alfspy.core.rendering import Resolution, Camera, CtxShot, RenderResultMode, TextureData
@@ -59,7 +64,7 @@ def polyline_to_bounding_box(polyline: List[int]) -> Tuple[int, int, int, int]:
 #         label["label_id"] = label_id
 
 # Get shots for a list of image files
-def get_shots_for_files(image_files: List[str], images_folder: str, ctx: TorchContext, corrections_data: Dict[str, any], matched_poses: dict, lazy: bool = False, fovy: float = 60.0, central_frame_idx: Optional[int] = None):
+def get_shots_for_files(image_files: List[str], images_folder: str, ctx: 'TorchContext', corrections_data: Dict[str, any], matched_poses: dict, lazy: bool = False, fovy: float = 60.0, central_frame_idx: Optional[int] = None):
     shots = []
     shot_names = []
     shots_rotation_eulers = []

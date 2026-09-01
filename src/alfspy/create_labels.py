@@ -1,12 +1,17 @@
 import json
 import os
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import cv2
 import numpy as np
 from pyrr import Vector3, Quaternion
 from trimesh import Trimesh
-from alfspy.core.torchgl import TorchContext
+# TorchContext is used for annotations only, and ``alfspy.core.torchgl`` imports torch
+# at module level. Importing it eagerly would make torch a hard requirement of this
+# module, and so of every engine -- exactly what the optional backend extras exist to
+# avoid. The annotations that use it are strings for the same reason.
+if TYPE_CHECKING:  # pragma: no cover
+    from alfspy.core.torchgl import TorchContext
 from alfspy.core.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo import Transform
 from alfspy.core.rendering import Resolution, Camera, CtxShot
@@ -17,7 +22,7 @@ from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import read_gltf, process_render_data, make_camera, make_torch_context
 
 
-def get_shots_for_files(ctx: TorchContext, mask, correction: Transform,
+def get_shots_for_files(ctx: 'TorchContext', mask, correction: Transform,
                         matched_poses: dict, lazy: bool = False, fovy: float = 60.0):
     shots = []
     shot_names = []
