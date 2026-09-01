@@ -31,3 +31,12 @@ dependencies = [
     "trimesh[easy]==3.21.7",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["test"]
+# Both the repo root (for `test.helpers`) and `src` (for `alfspy`), so the suite runs
+# without the package being installed.
+pythonpath = [".", "src"]
+markers = [
+    "gl: requires a working OpenGL context",
+]
+
