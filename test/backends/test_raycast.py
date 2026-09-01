@@ -183,3 +183,38 @@ def test_missing_backend_names_its_extra():
             get_raycaster(name)
         except ImportError as exc:
             assert f'AlfsPy[{name}]' in str(exc)
+
+
+def test_env_var_selects_the_raycaster_end_to_end(monkeypatch, small_flight):
+    """
+    `resolve_raycaster` honouring $ALFS_RAYCASTER is not enough on its own -- the value has to
+    survive all the way to the object a scene actually casts with, which is where a user would
+    rely on it. The engine has the same test in `test_engine_selection.py`.
+    """
+    if 'warp' not in BACKENDS:
+        pytest.skip('warp backend not available')
+
+    from alfspy.render.projection import ProjectionScene
+
+    monkeypatch.setenv('ALFS_RAYCASTER', 'warp')
+    scene = ProjectionScene(small_flight.dem_file, small_flight.poses_file,
+                            small_flight.correction_file)
+    try:
+        assert type(scene.raycaster).__name__ == 'WarpRayCaster'
+    finally:
+        scene.release()
+
+
+def test_an_explicit_raycaster_beats_the_env_var(monkeypatch, small_flight):
+    if len(BACKENDS) < 2:
+        pytest.skip('need two ray casters to compare')
+
+    from alfspy.render.projection import ProjectionScene
+
+    monkeypatch.setenv('ALFS_RAYCASTER', 'warp')
+    scene = ProjectionScene(small_flight.dem_file, small_flight.poses_file,
+                            small_flight.correction_file, raycaster='embree')
+    try:
+        assert type(scene.raycaster).__name__ == 'EmbreeRayCaster'
+    finally:
+        scene.release()

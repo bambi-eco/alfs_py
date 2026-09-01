@@ -28,6 +28,25 @@ pip install "AlfsPy[dev]"         # all + pytest, so the suite runs without skip
 
 Extras combine, so `pip install "AlfsPy[moderngl,torch]"` gives you both engines.
 
+```python
+from alfspy import render_integral, ProjectionScene, make_context, available_engines
+
+print(available_engines())        # ['moderngl', 'torch', 'vulkan'] — whatever works here
+
+render_integral(dem_file, poses_file, mask_file, engine='torch')
+
+with ProjectionScene(dem_file, poses_file, correction_file, engine='vulkan') as scene:
+    scene.project_orthographic('frame_002120.png', output_image='ortho.png')
+```
+
+`$ALFS_ENGINE` sets the default when no `engine=` is given. Importing `alfspy` pulls in none
+of the backends; each is imported only when selected.
+
+```bash
+pytest -q     # Tests needing an unavailable backend, device or dependency skip rather
+              # than fail, so a minimal install still gives a green run.
+```
+
 ### All extras
 
 | Extra | Brings | For |
@@ -59,25 +78,6 @@ order*. `EmbreeRayCaster.accelerated` tells you which one is live.
 
 `warp` is worth installing only if you cast far more rays than label projection does — see
 [Ray casting](#ray-casting) for the measured crossover.
-
-```python
-from alfspy import render_integral, ProjectionScene, make_context, available_engines
-
-print(available_engines())        # ['moderngl', 'torch', 'vulkan'] — whatever works here
-
-render_integral(dem_file, poses_file, mask_file, engine='torch')
-
-with ProjectionScene(dem_file, poses_file, correction_file, engine='vulkan') as scene:
-    scene.project_orthographic('frame_002120.png', output_image='ortho.png')
-```
-
-`$ALFS_ENGINE` sets the default when no `engine=` is given. Importing `alfspy` pulls in none
-of the backends; each is imported only when selected.
-
-```bash
-pytest -q     # Tests needing an unavailable backend, device or dependency skip rather
-              # than fail, so a minimal install still gives a green run.
-```
 
 ## Overview
 
@@ -346,13 +346,20 @@ since it has no out-of-sample transform.
 
 ## Ray casting
 
-Ray–mesh intersection is used to project labels onto the DEM, and is pluggable too:
+Ray–mesh intersection is used to project labels onto the DEM, and is selected exactly the
+way the render backend is:
 
 ```python
-ProjectionScene(dem, poses, correction, raycaster='warp')    # or $ALFS_RAYCASTER
+ProjectionScene(dem, poses, correction, raycaster='warp')   # per scene
+cast_ray(origins, directions, mesh, raycaster='warp')       # per call
 ```
 
-`embree` is the default. Measured on a 131k-triangle DEM, the crossover is around 10⁴ rays:
+```bash
+export ALFS_RAYCASTER=warp                                  # per process
+```
+
+Precedence matches the engine: an explicit argument, then `$ALFS_RAYCASTER`, then the
+default. `embree` is the default. Measured on a 131k-triangle DEM, the crossover is around 10⁴ rays:
 
 | rays | embree | Warp CUDA |
 |---|---|---|
