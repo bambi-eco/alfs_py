@@ -9,6 +9,7 @@ from pyrr import Vector3
 from trimesh import Trimesh
 
 from alfspy.core.convert.data import PixelOrigin, Distortion
+from alfspy.core.raycast import RayCaster, create_raycaster
 from alfspy.core.rendering.camera import Camera
 from alfspy.core.rendering.data import MeshData
 from alfspy.core.util.defs import Number
@@ -148,23 +149,29 @@ def adjacent_angle(ref_angle: float, offset: ArrayLike, ref_offset: float) -> fl
 
 
 def cast_ray(ray_origins: Union[Vector3, Sequence[Vector3]], ray_directions: Union[Vector3, Sequence[Vector3]],
-             mesh: Union[MeshData, Trimesh], include_misses: bool = True) -> Sequence[Optional[ArrayLike]]:
+             mesh: Union[MeshData, Trimesh, RayCaster], include_misses: bool = True,
+             raycaster: Optional[str] = None) -> Sequence[Optional[ArrayLike]]:
     """
     Casts a ray to find an intersection with the given mesh.
     :param ray_origins: One or more vectors describing the ray origins.
     :param ray_directions: One or more vectors describing the ray directions from their origin.
-    :param mesh: The mesh to intersect with.
+    :param mesh: The mesh to intersect with. Pass a
+    :class:`~alfspy.core.raycast.base.RayCaster` to reuse an acceleration structure across
+    calls -- building one for a 131k-triangle DEM costs about 0.1 s, so rebuilding it per call
+    dominates the cost of the cast itself.
     :param include_misses: Whether non-intersecting rays should be included in the result via ``None`` values (default
     value is ``True``). If set to ``True``, the result indices correspond to the indices of a rays  origin or direction.
+    :param raycaster: Which ray-caster backend to build when ``mesh`` is not already a
+    ``RayCaster`` -- ``"embree"`` or ``"warp"`` (optional). Defaults to ``$ALFS_RAYCASTER``
+    and then to ``embree``.
     :return: If there were no hits ``None``; otherwise the coordinate of the first hit.
     """
-    if not isinstance(mesh, Trimesh):
-        mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.indices)
+    caster = mesh if isinstance(mesh, RayCaster) else create_raycaster(mesh, backend=raycaster)
 
     origins = np.array(ray_origins).reshape((-1, 3))
     directions = np.array(ray_directions).reshape((-1, 3))
 
-    hits, ray_indices, *_ = mesh.ray.intersects_location(origins, directions, multiple_hits=False)
+    hits, ray_indices = caster.intersects_first(origins, directions)
 
     if include_misses:
         if isinstance(ray_origins, Vector3):
@@ -347,9 +354,11 @@ def world_to_pixel_coord2(
     return result
 
 
-def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, mesh: Union[MeshData, Trimesh],
+def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int,
+                         mesh: Union[MeshData, Trimesh, RayCaster],
                          camera: Camera, distortion: Optional[Distortion] = None,
-                         camera_matrix: Optional[NDArray] = None, include_misses: bool = True) -> Sequence[Optional[ArrayLike]]:
+                         camera_matrix: Optional[NDArray] = None, include_misses: bool = True,
+                         raycaster: Optional[str] = None) -> Sequence[Optional[ArrayLike]]:
     """
     Converts pixel coordinates to 3D world coordinates by projecting them from a camera onto a mesh. The viewport origin
     is assumed to be in the top left corner of the image, with the positive x-axis pointing to the right and the y-axis
@@ -359,8 +368,8 @@ def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, me
     :param width: The total width of the respective viewport.
     :param height: The total height of the respective viewport.
     :param mesh: The mesh to project the coordinates onto; Its surface represents the set of all possible world
-    coordinate outputs. Passing and reusing the same ``Trimesh`` instance can lead to a significant performance boost
-    compared to passing the raw mesh data or a new instance for every conversion.
+    coordinate outputs. Pass a :class:`~alfspy.core.raycast.base.RayCaster` to reuse one
+    acceleration structure across calls instead of rebuilding it per conversion.
     :param camera: The camera to project the coordinates through. In the case of reversing a render projection, this
     camera should be equal to the camera used for rendering.
     :param distortion: The distortion to be removed from the given pixel coordinates (optional). If specified, the pixel
@@ -425,5 +434,6 @@ def pixel_to_world_coord(x: ArrayLike, y: ArrayLike, width: int, height: int, me
         # the ray origin is the same as the camera origin
         ray_origins = np.broadcast_to(camera_position, (count, 3))
 
-    res = cast_ray(ray_origins, ray_dirs, mesh, include_misses=include_misses)
+    res = cast_ray(ray_origins, ray_dirs, mesh, include_misses=include_misses,
+                   raycaster=raycaster)
     return res

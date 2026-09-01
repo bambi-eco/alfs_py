@@ -60,6 +60,7 @@ from alfspy.core.backends import resolve_engine
 
 from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo.transform import Transform
+from alfspy.core.raycast import create_raycaster
 from alfspy.core.rendering import (
     Camera,
     CtxShot,
@@ -213,6 +214,7 @@ class ProjectionScene:
         settings: Optional[ProjectionSettings] = None,
         ctx=None,
         engine: Optional[str] = None,
+        raycaster: Optional[str] = None,
         device: Optional[str] = None,
         gl_backend: Optional[str] = None,
     ):
@@ -230,6 +232,9 @@ class ProjectionScene:
             :data:`~alfspy.core.backends.registry.DEFAULT_ENGINE`.
         :param device: The torch device to render on, e.g. ``"cpu"`` or ``"cuda"`` (optional).
             Used only when creating a torch context.
+        :param raycaster: Which ray-caster backend to use for label projection --
+            ``"embree"`` or ``"warp"`` (optional). Defaults to ``$ALFS_RAYCASTER`` and then to
+            ``embree``, which is the right choice for the tens of rays a frame's labels need.
         :param gl_backend: An explicit ModernGL backend, e.g. ``"egl"`` for headless Linux
             (optional). Used only when creating a ModernGL context.
         """
@@ -267,10 +272,14 @@ class ProjectionScene:
             if self.settings.input_resolution is None:
                 self.settings.input_resolution = Resolution(mask_img.shape[1], mask_img.shape[0])
 
-        # ── Mesh / texture / ray-casting mesh ────────────────────────────────
+        # ── Mesh / texture / ray caster ──────────────────────────────────────
         mesh_data, texture_data = read_gltf(dem_file)
-        # Build the ray-casting mesh from the raw vertices before process_render_data alters them.
-        self.tri_mesh = Trimesh(vertices=mesh_data.vertices, faces=mesh_data.indices)
+        # Build the ray caster from the raw vertices before process_render_data alters them.
+        # The scene owns it so its acceleration structure is built once and reused for every
+        # label projection, rather than rebuilt per call.
+        self.raycaster = create_raycaster(
+            (mesh_data.vertices, mesh_data.indices), backend=raycaster)
+        self.tri_mesh = self.raycaster
         self.mesh_data, self.texture_data = process_render_data(mesh_data, texture_data)
         self.mesh_aabb = get_aabb(self.mesh_data.vertices)
 

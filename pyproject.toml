@@ -54,11 +54,19 @@ torch = [
     "torch>=1.13",
 ]
 
-# Accelerated ray/mesh intersection for label projection. Pure-Python fallbacks exist, so
-# these are not required for correctness -- only for throughput on large DEMs.
+# Accelerated ray/mesh intersection for label projection. Without these, trimesh silently
+# falls back to its pure-Python intersector, which is not merely slow -- it returns hits in a
+# different index order.
 accel = [
     "Rtree>=1.0",
     "embreex>=2.17; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+]
+
+# GPU ray casting via NVIDIA Warp. Worth it above roughly 1e4 rays per call; below that,
+# launch and transfer overhead mean it only ties embree. Label projection casts tens of rays
+# per frame, so this is for bulk work rather than the default pipeline.
+raycast-gpu = [
+    "warp-lang>=1.0",
 ]
 
 test = [
