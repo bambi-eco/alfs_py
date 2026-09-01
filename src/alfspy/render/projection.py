@@ -1,7 +1,7 @@
 """High-level wrappers for orthographic projection and airborne light field (ALFS) rendering.
 
 This module abstracts the boilerplate shown in the BAMBI dataset introduction notebook
-(loading the DEM mesh, poses, correction and mask, building the ModernGL context, creating
+(loading the DEM mesh, poses, correction and mask, building the render context, creating
 shots/cameras, rendering, and projecting bounding-box labels) into a single reusable
 ``ProjectionScene`` object with two methods:
 
@@ -51,10 +51,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import cv2
-import moderngl
 import numpy as np
 from pyrr import Matrix44, Quaternion, Vector3
 from trimesh import Trimesh
+
+from alfspy.core.torchgl import TorchContext
 
 from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo.transform import Transform
@@ -72,6 +73,7 @@ from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import (
     make_camera,
     make_shot_loader,
+    make_torch_context,
     process_render_data,
     read_gltf,
     release_all,
@@ -196,7 +198,7 @@ def _to_yolo(bbox: Tuple[float, float, float, float], img_width: int, img_height
 class ProjectionScene:
     """Loads a flight's DEM, poses, correction and mask once and renders projections from it.
 
-    A single scene owns one ModernGL context, the processed mesh/texture and a ray-casting
+    A single scene owns one render context, the processed mesh/texture and a ray-casting
     :class:`~trimesh.Trimesh`. Reuse it across many frames to avoid reloading the (potentially
     large) DEM for every render. Call :meth:`release` when finished, or use the scene as a
     context manager.
@@ -209,7 +211,8 @@ class ProjectionScene:
         correction_file: str,
         mask_file: Optional[str] = None,
         settings: Optional[ProjectionSettings] = None,
-        ctx: Optional[moderngl.Context] = None,
+        ctx: Optional[TorchContext] = None,
+        device: Optional[str] = None,
         gl_backend: Optional[str] = None,
     ):
         """
@@ -218,10 +221,13 @@ class ProjectionScene:
         :param correction_file: Path to the flight correction JSON (``..._correction.json``).
         :param mask_file: Optional path to a projection mask image.
         :param settings: Render settings. Defaults to :class:`ProjectionSettings` defaults.
-        :param ctx: An existing ModernGL context to render in. If ``None`` a standalone context
-            is created (and released by :meth:`release`).
-        :param gl_backend: Optional ModernGL backend (e.g. ``"egl"`` for headless Linux) used
-            only when ``ctx`` is ``None``. Leave ``None`` for the platform default.
+        :param ctx: An existing :class:`~alfspy.core.torchgl.context.TorchContext` to render
+            in. If ``None`` one is created (and released by :meth:`release`).
+        :param device: The torch device to render on, e.g. ``"cpu"`` or ``"cuda"`` (optional).
+            Used only when ``ctx`` is ``None``; defaults to CUDA when available.
+        :param gl_backend: Deprecated and ignored. The torch backend needs no GL driver, so
+            there is no headless backend to select -- this is the parameter the Xvfb-based
+            deployment used to need.
         """
         self.settings = settings or ProjectionSettings()
 
@@ -233,10 +239,9 @@ class ProjectionScene:
         # ── Correction (transform + raw euler/translation for label cameras) ─
         self.correction, self._cor_translation, self._cor_rotation_eulers = _load_correction(correction_file)
 
-        # ── ModernGL context ─────────────────────────────────────────────────
+        # ── Render context ───────────────────────────────────────────────────
         if ctx is None:
-            self.ctx = (moderngl.create_standalone_context(backend=gl_backend)
-                        if gl_backend else moderngl.create_standalone_context())
+            self.ctx = make_torch_context(device=device)
             self._owns_ctx = True
         else:
             self.ctx = ctx
@@ -268,7 +273,7 @@ class ProjectionScene:
         self.release()
 
     def release(self) -> None:
-        """Release the mesh/texture and (if owned) the ModernGL context."""
+        """Release the mesh/texture and (if owned) the render context."""
         if self._released:
             return
         self.mesh_data = None
@@ -358,12 +363,12 @@ class ProjectionScene:
 
         This is derived from the *same* matrices the renderer uses for that frame's shot --
         the shot camera's view matrix composed with the correction, exactly as the shot
-        shader applies them (``P * C * V``). Label un-projection and image projection
+        program applies them (``P * C * V``). Label un-projection and image projection
         therefore agree by construction.
 
         Previously this rebuilt the camera by hand as ``position + correction_translation``
         and ``-(eulers - correction_eulers)``. The negation existed to cancel a transposed
-        rotation in ``pixel_to_world_coord``; both have now been fixed. The negation was also
+        rotation in ``pixel_to_world_coord``; both have been fixed. The negation was also
         only *approximately* a transpose: ``R(-e) == R(e).T`` holds for a single-axis
         rotation but not for composed Euler angles, so any frame with real pitch or roll had
         its labels projected through a camera off by several degrees. Near-nadir flights hid

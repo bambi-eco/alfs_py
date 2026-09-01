@@ -10,7 +10,7 @@ import os
 
 import numpy as np
 
-from alfspy.render.render import make_mgl_context
+from alfspy.core.backends.moderngl_ import create_context
 from test.golden.cases import CASES, render_case
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +25,7 @@ def golden_path(name: str) -> str:
 
 
 def main() -> None:
-    ctx = make_mgl_context()
+    ctx = create_context()
     try:
         print(f'renderer: {ctx.info["GL_RENDERER"]}')
         for name in CASES:

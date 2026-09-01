@@ -1,0 +1,85 @@
+name: tests
+
+# The whole point of the migration: this runs on a stock runner with no GPU, no GL driver
+# and no virtual framebuffer.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.9', '3.11', '3.12']
+        torch-version: ['']
+        include:
+          # Pin the oldest supported torch on one job, so the >=1.13 floor claimed in
+          # pyproject.toml is actually exercised rather than assumed.
+          - os: ubuntu-latest
+            python-version: '3.10'
+            torch-version: '==1.13.1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install torch (CPU build)
+        run: |
+          python -m pip install --upgrade pip
+          pip install "torch${{ matrix.torch-version }}" --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install project and test dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Report resolved versions
+        run: |
+          python -c "import torch, numpy, cv2, trimesh; print('torch', torch.__version__); print('numpy', numpy.__version__); print('cv2', cv2.__version__); print('trimesh', trimesh.__version__)"
+          python -c "import sys; sys.path.insert(0,'src'); import alfspy.core.torchgl as t; print('scatter_reduce:', t.HAS_SCATTER_REDUCE); print('notes:', t.COMPAT_NOTES)"
+
+      - name: Run tests
+        run: pytest -q --durations=10
+
+      - name: Verify the matrix conventions still hold
+        run: python -m test.tools.probe_pyrr
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build --tag alfs-torch -f Dockerfile .
+
+      - name: Confirm the renderer works with no GL driver and no display
+        run: |
+          docker run --rm --entrypoint python alfs-torch -c "
+          import numpy as np
+          from pyrr import Quaternion, Vector3
+          from alfspy.core.rendering import CtxShot, RenderResultMode, Renderer, Resolution, TextureData, MeshData
+          from alfspy.core.torchgl import create_context
+
+          ctx = create_context(device='cpu')
+          verts = np.array([[-5,-5,0],[5,-5,0],[5,5,0],[-5,5,0]], dtype='f4')
+          mesh = MeshData(vertices=verts,
+                          indices=np.array([[0,1,2],[0,2,3]], dtype=np.uint32),
+                          uvs=np.array([[0,0],[1,0],[1,1],[0,1]], dtype='f4'))
+          tex = TextureData(np.full((8,8,4), 255.0, dtype='f4'))
+          from alfspy.core.rendering import Camera
+          cam = Camera(orthogonal=True, orthogonal_size=(10.0,10.0),
+                       position=Vector3([0.0,0.0,10.0]), far=100.0)
+          r = Renderer(Resolution(32,32), ctx, cam, mesh, tex)
+          img = r.render_background()
+          assert img.shape == (32,32,4), img.shape
+          assert (img[...,3] > 0).all(), 'background did not cover the viewport'
+          print('headless render OK', img.shape)
+          "

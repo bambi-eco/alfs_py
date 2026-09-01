@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Tuple, Dict, Set, Any
 from pathlib import Path
 import cv2
-from moderngl import Context
+from alfspy.core.torchgl import TorchContext
 import numpy as np
 import logging
 import sys
@@ -39,7 +39,7 @@ from alfspy.core.util.collections.cyclic import CyclicList
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
-from alfspy.render.render import make_camera, make_mgl_context, make_shot_loader, process_render_data, read_gltf, release_all
+from alfspy.render.render import make_camera, make_torch_context, make_shot_loader, process_render_data, read_gltf, release_all
 
 
 LABEL_COLORS = CyclicList((  # BGR
@@ -224,7 +224,7 @@ def get_frame_correction(corrections_data: dict, frame_idx: int, central_frame_i
 def get_shots_for_files(
     image_files: List[str],
     images_folder: str,
-    ctx: Context,
+    ctx: TorchContext,
     corrections_data: Dict[str, any],
     matched_poses: dict,
     fovy: float = 60.0,
@@ -483,8 +483,8 @@ def render_alfs_for_flight(
     tri_mesh = Trimesh(vertices=mesh_data.vertices, faces=mesh_data.indices)
     mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
-    # Create context and get all shots for key frames
-    ctx = make_mgl_context()
+    # Create TorchContext and get all shots for key frames
+    ctx = make_torch_context()
     shots, shot_names, shots_rotation_eulers, corrections, correction_eulers, central_correction_metas = get_shots_for_files(
         flight_frames, images_folder, ctx, corrections_data, matched_poses, config.fovy
     )

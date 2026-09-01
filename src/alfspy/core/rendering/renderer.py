@@ -1,20 +1,58 @@
+"""The ALFS renderer, backed by PyTorch instead of OpenGL.
+
+The public surface is unchanged from the ModernGL version -- ``render_background``,
+``project_shots``, ``project_shots_iter``, ``render_integral``, ``apply_matrices`` and
+``release`` keep their signatures and return types. What changed is underneath: there is no
+GL context, no bound framebuffer and no driver-owned surface, which is what removes the
+stale-buffer artifacts documented in ``docs/MIGRATION_REVIEW.md`` section 3.
+
+Matrices stay in pyrr's row-vector convention throughout; see ``docs/pyrr_conventions.md``.
+"""
+
 from collections import defaultdict
 from functools import cached_property
-from typing import Final, Optional, Iterable, Union, Iterator, Callable, cast
+from typing import Final, Optional, Iterable, Union, Iterator, Callable
 
 import cv2
-import moderngl as mgl
 import numpy as np
-from moderngl import Context, Program, Framebuffer, Texture
+import torch
 from numpy.typing import NDArray
 
 from alfspy.core.geo import AABB
 from alfspy.core.rendering import Camera, MeshData, TextureData, RenderObject, Resolution, RenderResultMode, CtxShot
+from alfspy.core.torchgl import (
+    ADDITIVE_BLENDING,
+    BLEND,
+    DEPTH_TEST,
+    Fragments,
+    TorchContext,
+    TorchFramebuffer,
+    TorchTexture,
+    as_matrix,
+    iter_fragments,
+    resolve_depth,
+    setup_triangles,
+    shade_object,
+    shade_shot_projected,
+    shot_clip_coords,
+    transform_vertices,
+)
 from alfspy.core.util.basic import gen_checkerboard_tex
 from alfspy.core.util.defs import TRANSPARENT, BLACK, MAGENTA, PATH_SEP
+from alfspy.core.util.framebuffer import img_from_fbo
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.image import overlay
-from alfspy.core.util.moderngl import img_from_fbo
+
+
+def _no_fragments(device: torch.device, dtype: torch.dtype) -> Fragments:
+    """
+    :return: An empty :class:`Fragments` batch on the given device.
+    """
+    empty = torch.zeros(0, device=device, dtype=torch.int64)
+    return Fragments(empty, empty.clone(),
+                     torch.zeros((0, 3), device=device, dtype=dtype),
+                     torch.zeros((0, 3), device=device, dtype=dtype),
+                     torch.zeros(0, device=device, dtype=dtype))
 
 
 class _IntegralSumCallback:
@@ -23,28 +61,29 @@ class _IntegralSumCallback:
 
     def __call__(self, arr: NDArray) -> None:
         self.sum += arr
-        # print(' | '.join([str(arr.shape), str(arr.max(initial=0)), str(arr.min(initial=255))]))
         del arr
 
 
 class Renderer:
+    """
+    Renders a background mesh and projects source frames onto it.
+    """
+
     _released: bool
     _resolution: Final[Resolution]
-    _ctx: Final[Context]
-    _fbo: Final[Framebuffer]
-    _obj_prog: Final[Program]
+    _ctx: Final[TorchContext]
+    _fbo: Final[TorchFramebuffer]
     _obj: RenderObject
-    _shot_prog: Final[Program]
-    _mask_tex: Optional[Texture]
+    _mask_tex: Optional[TorchTexture]
     mesh_aabb: Final[AABB]
     camera: Camera
 
-    def __init__(self, resolution: Resolution, ctx: Context, camera: Camera, mesh: MeshData,
+    def __init__(self, resolution: Resolution, ctx: TorchContext, camera: Camera, mesh: MeshData,
                  texture: Optional[TextureData] = None):
         """
         Initializes a new ``Renderer`` object.
         :param resolution: The resolution of the images to render.
-        :param ctx: The ModernGL context to be used by the renderer.
+        :param ctx: The torch context to be used by the renderer.
         :param camera: The camera to be used by the renderer.
         :param mesh: The mesh data of the main mesh the renderer should work with. It represents the canvas and or
         background of all done projections or renders.
@@ -54,25 +93,44 @@ class Renderer:
         self._released = False
         self._resolution = resolution
         self._ctx = ctx
-        self._fbo = self._ctx.simple_framebuffer(resolution.as_tuple(), components=4, dtype='f4')
-        self._fbo.use()
+        self._fbo = ctx.simple_framebuffer(resolution.as_tuple(), components=4)
 
         if texture is None:
             texture = TextureData(gen_checkerboard_tex(10, 50, BLACK, MAGENTA, dtype='f4'))
 
-        self._obj_prog = ctx.program(vertex_shader=self._OBJ_VERT_SHADER, fragment_shader=self._OBJ_FRAG_SHADER)
-        self._obj = RenderObject.from_mesh(self._obj_prog, mesh, texture, self._PAR_POS, self._PAR_UV)
+        self._obj = RenderObject.from_mesh(ctx, mesh, texture)
         self.mesh_aabb = get_aabb(mesh.vertices)
-
-        self._shot_prog = ctx.program(vertex_shader=self._SHOT_VERT_SHADER, fragment_shader=self._SHOT_FRAG_SHADER)
-        self._shot_prog[self._PAR_TEX] = self._S2_LOC_TEX
-        self._shot_prog[self._PAR_MASK] = self._S2_LOC_MASK
-        self._shot = self._get_shot_render_object()
 
         self._mask_tex = None
 
+        # Cached matrices, refreshed by ``apply_matrices``.
+        self._model_mat: Optional[torch.Tensor] = None
+        self._view_mat: Optional[torch.Tensor] = None
+        self._proj_mat: Optional[torch.Tensor] = None
+        self._world_positions: Optional[torch.Tensor] = None
+        # (depth_test, cull_mode, fragments) for the current camera and model transform.
+        self._raster_cache: Optional[tuple] = None
+        # Per-fragment world positions matching ``_raster_cache``; see ``_fragment_world``.
+        self._frag_world: Optional[torch.Tensor] = None
+
         self.camera = camera
         self.apply_matrices()
+
+    # region properties
+
+    @property
+    def ctx(self) -> TorchContext:
+        """
+        :return: The context this renderer draws with.
+        """
+        return self._ctx
+
+    @property
+    def fbo(self) -> TorchFramebuffer:
+        """
+        :return: The render target this renderer draws into.
+        """
+        return self._fbo
 
     @property
     def render_shape(self) -> tuple[int, int, int]:
@@ -81,76 +139,207 @@ class Renderer:
         """
         return self._resolution[1], self._resolution[0], 4
 
-    def _get_shot_render_object(self) -> RenderObject:
-        vertex_buf = self._obj.vertex_buf
-        vao_content = [(vertex_buf, '3f4', self._PAR_POS)]
-        ibo = self._obj.ibo
-        if ibo is not None:
-            vao = self._ctx.vertex_array(self._shot_prog, vao_content, index_buffer=ibo, index_element_size=4)
-        else:
-            vao = self._ctx.vertex_array(self._shot_prog, vao_content)
-
-        return RenderObject(vao, vao_content, vertex_buf, None, ibo, self._obj.tex)
+    # endregion
 
     def apply_matrices(self) -> None:
         """
-        Applies the current camera and mesh matrix values to the shader.
+        Applies the current camera and mesh matrix values to the render state.
+
+        Replaces the ModernGL version's uniform uploads. World-space vertex positions are
+        cached here because both programs need them and the model matrix rarely changes.
         """
-        for prog in (self._obj_prog, self._shot_prog):
-            prog[self._PAR_MODEL].write(self._obj.mat())
-            prog[self._PAR_VIEW].write(self.camera.get_view())
-            prog[self._PAR_PROJ].write(self.camera.get_proj())
+        device, dtype = self._ctx.device, self._ctx.dtype
+
+        self._model_mat = as_matrix(self._obj.mat(), device, dtype)
+        self._view_mat = as_matrix(self.camera.get_view(), device, dtype)
+        self._proj_mat = as_matrix(self.camera.get_proj(), device, dtype)
+        self._world_positions = transform_vertices(self._obj.vertices, self._model_mat)
+        self._raster_cache = None
+        self._frag_world = None
 
     def release(self) -> None:
         """
-        Releases all objects associated with the given context.
+        Releases all objects associated with this renderer.
         """
         if not self._released:
             if self._mask_tex is not None:
                 self._mask_tex.release()
+                self._mask_tex = None
 
             self._obj.release()
             self._fbo.release()
-            self._obj_prog.release()
-            self._shot_prog.release()
+            self._world_positions = None
+            self._raster_cache = None
+            self._frag_world = None
             self._released = True
+
+    # region rasterisation
+
+    def _rasterise(self, depth_test: Optional[bool] = None) -> Fragments:
+        """
+        Rasterises the background mesh from the current camera.
+
+        The result is cached. Coverage depends only on the mesh, the camera and the render
+        state -- none of which change while shots are being projected -- so integrating N
+        shots rasterises once and shades N times instead of repeating identical geometry work
+        N times. :meth:`apply_matrices` invalidates the cache.
+
+        :param depth_test: Whether to depth-resolve (optional). Defaults to the context state.
+        :return: The covered fragments. With depth testing that is one fragment per pixel;
+            without it, every covered fragment, which is what ``disable(DEPTH_TEST)``
+            produced in GL.
+        """
+        if depth_test is None:
+            depth_test = self._ctx.depth_test
+
+        cached = self._raster_cache
+        if cached is not None and cached[0] == depth_test and cached[1] == self._ctx.culling:
+            return cached[2]
+
+        self._frag_world = None
+        width, height = self._resolution.as_tuple()
+        mvp = self._model_mat @ self._view_mat @ self._proj_mat
+        clip = transform_vertices(self._obj.vertices, mvp)
+
+        setup = setup_triangles(clip, self._obj.triangles, width, height,
+                                cull_face=self._ctx.culling, front_face=self._ctx.front_face)
+
+        if depth_test:
+            fragments = resolve_depth(setup, width, height, self._ctx.sample_budget)
+        else:
+            chunks = list(iter_fragments(setup, width, height, self._ctx.sample_budget))
+            fragments = Fragments.concat(chunks) if chunks else _no_fragments(
+                self._ctx.device, self._ctx.dtype)
+
+        self._raster_cache = (depth_test, self._ctx.culling, fragments)
+        return fragments
+
+    def _fragment_world(self, fragments: Fragments) -> torch.Tensor:
+        """
+        Returns the world-space position of every fragment, interpolating on first use.
+
+        This is the per-shot loop's hot path. Projecting a shot needs its clip coordinates at
+        each fragment, which the GL shader obtained by interpolating a per-vertex varying.
+        Doing that per shot means an ``(N, 3, 4)`` gather over a million fragments for every
+        one of them. Interpolating the *world* position once instead and multiplying it by
+        each shot's matrix gives the identical result -- see
+        :func:`~alfspy.core.torchgl.programs.shade_shot_projected` for why -- at the cost of
+        one matmul per shot.
+
+        The cache is tied to the rasterisation and dropped whenever that is.
+
+        :param fragments: The fragments to interpolate at.
+        :return: ``(N, 4)`` per-fragment world positions.
+        """
+        cached = self._frag_world
+        if cached is not None and cached.shape[0] == len(fragments):
+            return cached
+
+        world = fragments.interpolate(self._world_positions, self._obj.triangles)
+        self._frag_world = world
+        return world
+
+    def invalidate_raster_cache(self) -> None:
+        """
+        Drops the cached rasterisation, freeing its memory.
+
+        Call this when a renderer is kept alive but idle. :meth:`apply_matrices` does it
+        automatically whenever the camera or model transform changes.
+        """
+        self._raster_cache = None
+        self._frag_world = None
+
+    def _write(self, pixel_index: torch.Tensor, colour: torch.Tensor, additive: bool) -> None:
+        """
+        Writes shaded fragments into the framebuffer.
+
+        :param pixel_index: ``(N,)`` flat pixel indices.
+        :param colour: ``(N, 4)`` RGBA values aligned with ``pixel_index``.
+        :param additive: Whether to accumulate (``ADDITIVE_BLENDING``) or overwrite.
+        """
+        if colour.numel() == 0:
+            return
+
+        flat = self._fbo.data.view(-1, self._fbo.components)
+        if additive:
+            flat.index_add_(0, pixel_index, colour.to(flat.dtype))
+        else:
+            flat[pixel_index] = colour.to(flat.dtype)
+
+    # endregion
 
     def render_background(self) -> NDArray:
         """
         Renders the ground object.
         :return: The finished render result.
         """
-        self._ctx.clear(*TRANSPARENT)
-        self._obj.tex_use()
-        self._obj.render()
+        self._fbo.clear(TRANSPARENT)
+
+        fragments = self._rasterise(depth_test=True)
+        if len(fragments):
+            uvs = self._obj.uvs
+            if uvs is None:
+                colour = torch.ones((len(fragments), 4), device=self._ctx.device, dtype=self._ctx.dtype)
+            else:
+                colour = shade_object(fragments, uvs, self._obj.triangles, self._obj.tex)
+            self._write(fragments.pixel_index, colour, additive=False)
+
         return img_from_fbo(self._fbo)
 
-    def _use_mask(self, mask: Optional[TextureData]):
+    def _use_mask(self, mask: Optional[TextureData]) -> None:
+        if self._mask_tex is not None:
+            self._mask_tex.release()
+            self._mask_tex = None
+
         if mask is not None:
-            if self._mask_tex is not None:
-                self._mask_tex.release()
-                del self._mask_tex
-            self._mask_tex = self._ctx.texture(*mask.tex_gen_input(), dtype='f4')
-            self._mask_tex.use(self._S2_LOC_MASK)
-            self._shot_prog[self._PAR_MASK_FLAG].value = self._VAL_TRUE
-        else:
-            self._shot_prog[self._PAR_MASK_FLAG].value = self._VAL_FALSE
+            self._mask_tex = TorchTexture(mask.texture, device=self._ctx.device, dtype=self._ctx.dtype)
 
-    def _use_shot(self, shot: CtxShot):
-        shot.tex_use(self._S2_LOC_TEX)
-        self._shot_prog[self._PAR_SHOT_PROJ].write(shot.get_proj())
-        self._shot_prog[self._PAR_SHOT_VIEW].write(shot.get_view())
-        self._shot_prog[self._PAR_SHOT_CORRECTION].write(shot.get_correction())
+    def _shot_clip(self, shot: CtxShot, positions: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        :param shot: The shot to compute clip coordinates for.
+        :param positions: The world-space positions to transform (optional; defaults to the
+            mesh vertices). The renderer passes per-*fragment* positions, which is valid
+            because the transform is linear -- see
+            :func:`~alfspy.core.torchgl.programs.shade_shot_projected`.
+        :return: ``(N, 4)`` coordinates in the shot camera's clip space.
+        """
+        device, dtype = self._ctx.device, self._ctx.dtype
+        if positions is None:
+            positions = self._world_positions
+        return shot_clip_coords(
+            positions,
+            as_matrix(shot.get_view(), device, dtype),
+            as_matrix(shot.get_correction(), device, dtype),
+            as_matrix(shot.get_proj(), device, dtype),
+        )
 
-    def _project_shot(self, shot: CtxShot) -> None:
-        self._use_shot(shot)
-        self._shot.render()
+    def _project_shot(self, shot: CtxShot, additive: bool, depth_test: Optional[bool] = None) -> None:
+        """
+        Projects a single shot onto the mesh and writes it into the framebuffer.
+
+        :param shot: The shot to project.
+        :param additive: Whether to accumulate instead of overwrite.
+        :param depth_test: Whether to depth-resolve (optional; defaults to the context state).
+        """
+        fragments = self._rasterise(depth_test=depth_test)
+        if not len(fragments):
+            return
+
+        clip = self._shot_clip(shot, self._fragment_world(fragments))
+        texture = shot.get_texture(self._ctx)
+
+        colour, keep = shade_shot_projected(clip, texture, self._mask_tex,
+                                            reject_behind_camera=self._ctx.reject_behind_camera)
+        if colour.numel() == 0:
+            return
+
+        self._write(fragments.pixel_index.index_select(0, keep), colour, additive=additive)
 
     def _psi_complete_view(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         background = self.render_background()
         for shot in shots:
-            self._ctx.clear(color=TRANSPARENT)
-            self._project_shot(shot)
+            self._fbo.clear(TRANSPARENT)
+            self._project_shot(shot, additive=False, depth_test=True)
             result = img_from_fbo(self._fbo)
             if release_shots:
                 shot.release()
@@ -158,8 +347,8 @@ class Renderer:
 
     def _psi_shot_view_relative(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         for shot in shots:
-            self._ctx.clear(color=TRANSPARENT)
-            self._project_shot(shot)
+            self._fbo.clear(TRANSPARENT)
+            self._project_shot(shot, additive=False, depth_test=True)
             result = img_from_fbo(self._fbo)
             if release_shots:
                 shot.release()
@@ -167,11 +356,10 @@ class Renderer:
 
     @cached_property
     def _psi_look_up(self) -> dict[RenderResultMode, Callable[[Iterable[CtxShot], bool], Iterator[NDArray]]]:
-        # Maybe make this static somehow
         def default(_):
             raise NotImplementedError(f'Renderer is using invalid render mode')
 
-        result: dict[RenderResultMode, Callable[[Iterable[CtxShot]], Iterator[NDArray]]] = defaultdict(default)
+        result: dict[RenderResultMode, Callable[[Iterable[CtxShot], bool], Iterator[NDArray]]] = defaultdict(default)
         result[RenderResultMode.Complete] = self._psi_complete_view
         result[RenderResultMode.ShotOnly] = self._psi_shot_view_relative
         return result
@@ -204,7 +392,7 @@ class Renderer:
         :param release_shots: Whether shots should be released after projection (defaults to ``False``).
         :param mask: The mask to be applied to each shot texture (optional).
         :param integral: Whether the result should be the integral of all rendered shots instead of single shot renders
-        (defaults to False). This process utilizes the CPU for integration and is significantly slower than the
+        (defaults to False). This process integrates on the CPU and is significantly slower than the
         ``render_integral`` method, which should be preferred.
         :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``).
         :param save_name_iter: An iterator iterating over file names to be used when the projections should be saved
@@ -258,17 +446,22 @@ class Renderer:
 
     def render_integral(self, shots: Union[CtxShot, Iterable[CtxShot]], release_shots: bool = False,
                         mask: Optional[TextureData] = None, save: bool = False,
-                        save_name: Optional[Iterator[str]] = None, auto_contrast: bool = True, alpha_threshold: float = 0.1 ) -> Optional[NDArray]:
+                        save_name: Optional[str] = None, auto_contrast: bool = True,
+                        alpha_threshold: float = 0.1) -> Optional[NDArray]:
         """
-        Renders the integral of the given shots on GPU using additive blending. This process will overwrite the current
-        blending function and disable the depth test. The image returned will be in the RGBA format.
+        Renders the integral of the given shots using additive accumulation. The image returned will be in the
+        RGBA format.
+
+        The alpha channel doubles as an overlap counter: every contributing shot adds ``1.0``, so dividing by it
+        normalises each pixel by how many shots actually saw it.
+
         :param shots: The shots to be projected and integrated.
         :param release_shots: Whether shots should be released after projection (defaults to ``False``).
         :param mask: The mask to be applied to each shot texture (optional).
         :param save: Whether the images should be directly saved instead of being returned (defaults to ``False``).
         :param save_name: The file name to be used when saving the result (optional).
-        :param auto_contrast: Whether the result should be automatically contrast adjusted (defaults to ``False``).
-        :param alpha_threshold: The threshold the minimum number of overlapping shots to be used as result (defaults to 0.1).
+        :param auto_contrast: Whether the result should be automatically contrast adjusted (defaults to ``True``).
+        :param alpha_threshold: The minimum number of overlapping shots for a pixel to be used (defaults to 0.1).
         :return: If save is ``True`` ``None``; otherwise the integral of the projected shots.
         """
         if not isinstance(shots, Iterable):
@@ -276,40 +469,43 @@ class Renderer:
 
         self._use_mask(mask)
 
-        self._ctx.enable(cast(int, mgl.BLEND))
-        self._ctx.disable(cast(int, mgl.DEPTH_TEST))
-        self._ctx.blend_func = mgl.ADDITIVE_BLENDING
+        # Mirrors the GL state the original set up. ``depth_test_in_integral`` keeps the
+        # ModernGL behaviour (every fragment accumulates) unless explicitly enabled.
+        self._ctx.enable(BLEND)
+        self._ctx.disable(DEPTH_TEST)
+        self._ctx.blend_func = ADDITIVE_BLENDING
+        depth_test = self._ctx.depth_test_in_integral
 
-        self._fbo.clear(color=TRANSPARENT)
+        self._fbo.clear(TRANSPARENT)
         for shot in shots:
-            self._project_shot(shot)
+            self._project_shot(shot, additive=True, depth_test=depth_test)
             if release_shots:
                 shot.release()
 
-        integral_bytes = self._fbo.read(components=4, dtype='f4', clamp=False)
-        integral_arr = np.frombuffer(integral_bytes, dtype=np.single).reshape((*self._fbo.size[1::-1], 4))
+        integral_arr = self._fbo.read_array(dtype='f4', clamp=False)
         alpha = integral_arr[:, :, -1][:, :, np.newaxis]
-        alpha_mask = (alpha > alpha_threshold) # Note: alpha contains full numbers (e.g. 3 if 3 shots are overlapping)
+        alpha_mask = (alpha > alpha_threshold)  # alpha counts overlaps, e.g. 3 for 3 shots
 
         # `out=` is essential. numpy's `where=` does not initialise the excluded entries, so
         # without an explicit output array every below-threshold pixel holds whatever was in
         # the freshly allocated buffer -- uninitialised heap memory. It then goes through
         # `* 255` and `.astype(np.uint8)`, producing values that change between runs and
-        # overflow or turn into NaN. This is a host-side source of the intermittent artifacts
-        # reported for the Xvfb deployment, and it is independent of OpenGL: it was usually
-        # masked on-premise because `add_background=True` paints over the uncovered region.
+        # overflow or turn into NaN. Upstream omitted `out=`, which is a second and entirely
+        # host-side source of the "sometimes, not always" artifacts the Xvfb deployment saw;
+        # it was usually masked by `add_background=True` painting over the uncovered region.
         out = np.divide(integral_arr, alpha, where=alpha_mask,
-                        out=np.zeros_like(integral_arr, dtype=np.single))
+                        out=np.zeros_like(integral_arr, dtype=np.float32))
         if auto_contrast and alpha_mask.any():
             mask_rgba = np.broadcast_to(alpha_mask, out.shape).copy()
-            mask_rgba[:,:,-1] = False # set alpha to 0
+            mask_rgba[:, :, -1] = False  # set alpha to 0
             min_val = np.min(out[mask_rgba])
             max_val = np.max(out[mask_rgba])
-            if max_val > min_val:  # a uniform region would divide by zero
+            if max_val > min_val:
                 out[mask_rgba] = (out[mask_rgba] - min_val) / (max_val - min_val)
         result = (out * 255).astype(np.uint8)[::-1, ...]
 
-        self._ctx.disable(cast(int, mgl.BLEND))
+        self._ctx.disable(BLEND)
+        self._ctx.enable(DEPTH_TEST)
 
         if save:
             if save_name is None:
@@ -319,104 +515,3 @@ class Renderer:
             return None
         else:
             return result
-
-
-    # region Shader Constants
-
-    _PAR_POS: Final[str] = 'v_in_v3_pos'
-    _PAR_UV: Final[str] = 'v_in_v2_uv'
-    _PAR_PROJ: Final[str] = 'u_m4_proj'
-    _PAR_VIEW: Final[str] = 'u_m4_view'
-    _PAR_MODEL: Final[str] = 'u_m4_model'
-    _PAR_TEX: Final[str] = 'u_s2_tex'
-    _PAR_MASK: Final[str] = 'u_s2_mask'
-    _PAR_MASK_FLAG: Final[str] = 'u_f_mask'
-    _PAR_SHOT_PROJ: Final[str] = 'u_m4_shot_proj'
-    _PAR_SHOT_VIEW: Final[str] = 'u_m4_shot_view'
-    _PAR_SHOT_CORRECTION: Final[str] = 'u_m4_shot_correction'
-
-    _VAL_TRUE: Final[float] = 1.0
-    _VAL_FALSE: Final[float] = -1.0
-
-    _S2_LOC_TEX: Final[int] = 0
-    _S2_LOC_MASK: Final[int] = 1
-
-    _OBJ_VERT_SHADER: Final[str] = f"""
-    #version 330
-    uniform mat4 {_PAR_PROJ};
-    uniform mat4 {_PAR_VIEW};
-    uniform mat4 {_PAR_MODEL};
-    
-    layout (location = 0) in vec3 {_PAR_POS};
-    layout (location = 1) in vec2 {_PAR_UV};
-    out vec2 v_out_v2_uv;
-    
-    void main() {{
-        v_out_v2_uv = {_PAR_UV}.xy;
-        gl_Position = {_PAR_PROJ} * {_PAR_VIEW} * {_PAR_MODEL} * vec4({_PAR_POS}.xyz, 1.0);
-    }}
-    """
-
-    _OBJ_FRAG_SHADER: Final[str] = f"""
-    #version 330
-
-    uniform sampler2D {_PAR_TEX};
-    
-    in vec2 v_out_v2_uv;
-    out vec4 f_out_v4_color;
-    
-    void main() {{
-        f_out_v4_color = texture(u_s2_tex, v_out_v2_uv);
-    }}
-    """
-
-    _SHOT_VERT_SHADER: Final[str] = f"""
-    #version 330
-
-    // model view projection matrices of the focus surface (virtual camera)
-    uniform mat4 {_PAR_PROJ};
-    uniform mat4 {_PAR_VIEW};
-    uniform mat4 {_PAR_MODEL};
-
-    // view and camera/projection matrix for one shot:
-    uniform mat4 {_PAR_SHOT_PROJ};
-    uniform mat4 {_PAR_SHOT_VIEW};
-    uniform mat4 {_PAR_SHOT_CORRECTION};
-
-    layout (location = 0) in vec3 {_PAR_POS};
-    out vec4 v_out_v4_shot_uv;
-
-    void main() {{
-        vec4 world_pos = {_PAR_MODEL} * vec4({_PAR_POS}.xyz, 1.0);
-        gl_Position = {_PAR_PROJ} * {_PAR_VIEW} *  world_pos;
-        v_out_v4_shot_uv = {_PAR_SHOT_PROJ} * {_PAR_SHOT_CORRECTION} * {_PAR_SHOT_VIEW}  * world_pos;
-    }}
-    """
-
-    _SHOT_FRAG_SHADER: Final[str] = f"""
-    #version 330
-
-    uniform sampler2D {_PAR_TEX};
-    uniform sampler2D {_PAR_MASK};
-    uniform float {_PAR_MASK_FLAG};
-
-    in vec4 v_out_v4_shot_uv;
-    out vec4 f_out_v4_color;
-
-    void main() {{
-        vec4 uv = v_out_v4_shot_uv;
-        uv = vec4(uv.xyz / uv.w / 2.0 + .5, 1.0); // perspective division and conversion to [0,1] from NDC
-        
-        if(uv.w <= 0.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {{ // uv out of bounds
-            discard; // throw away the fragment 
-            f_out_v4_color = vec4(0.0, 0.0, 0.0, 0.0);
-        }} else {{
-            f_out_v4_color = vec4(texture({_PAR_TEX}, uv.xy).rgba);
-            if ({_PAR_MASK_FLAG} > 0.0) {{
-                f_out_v4_color.rgba *= texture({_PAR_MASK}, uv.xy).r;
-            }}
-        }}
-    }}
-    """
-
-    # endregion

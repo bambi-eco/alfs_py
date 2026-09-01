@@ -18,13 +18,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pyrr import Quaternion, Vector3
 
-from alfspy.core.rendering import (
-    CtxShot,
-    Renderer,
-    RenderResultMode,
-    Resolution,
-    TextureData,
-)
+from alfspy.core.backends.moderngl_ import CtxShot, Renderer
+from alfspy.core.rendering.data import RenderResultMode, Resolution, TextureData
 from test.helpers.scenes import (
     checkerboard_rgba,
     fovy_covering,

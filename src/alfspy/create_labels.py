@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from pyrr import Vector3, Quaternion
 from trimesh import Trimesh
-from moderngl import Context
+from alfspy.core.torchgl import TorchContext
 from alfspy.core.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo import Transform
 from alfspy.core.rendering import Resolution, Camera, CtxShot
@@ -14,10 +14,10 @@ from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.orthografic_projection import get_axis_aligned_bounding_box
 from alfspy.render.data import BaseSettings, CameraPositioningMode
-from alfspy.render.render import read_gltf, process_render_data, make_camera, make_mgl_context
+from alfspy.render.render import read_gltf, process_render_data, make_camera, make_torch_context
 
 
-def get_shots_for_files(ctx: Context, mask, correction: Transform,
+def get_shots_for_files(ctx: TorchContext, mask, correction: Transform,
                         matched_poses: dict, lazy: bool = False, fovy: float = 60.0):
     shots = []
     shot_names = []
@@ -104,7 +104,7 @@ if __name__ == '__main__':
         ]
     ]
 
-    ctx = make_mgl_context()
+    ctx = make_torch_context()
 
     # for flight_id in flight_ids:
     flight_key = 377

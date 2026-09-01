@@ -1,12 +1,14 @@
 import time
 
-from src.test import main as test_main
+# Upstream imported ``src.test``, a path that never resolved (the module lived at
+# ``src/alfspy/test.py``). It is now ``alfspy.scratch``; see that module's docstring.
+from alfspy.scratch import main as scratch_main
 
 
 def main() -> None:
     start_t = time.time()
 
-    test_main()
+    scratch_main()
 
     end_t = time.time()
     dur = end_t - start_t

@@ -1,6 +1,39 @@
 # Python based Airborne Light Field Sampling and Orthographic Projection
 
-A Python-based framework for Airborne Light-Field Sampling (ALFS) data visualization and orthographic projection of geo-referenced drone footage, implemented via ModernGL.
+A Python-based framework for Airborne Light-Field Sampling (ALFS) data visualization and orthographic projection of geo-referenced drone footage, implemented via **PyTorch**.
+
+> **This is the PyTorch port of ALFSPy.** The rendering backend no longer uses OpenGL:
+> there is no ModernGL, no GL driver, no X server and no Xvfb. Rendering runs on a
+> tensor-based rasteriser (`alfspy.core.torchgl`) on CPU or CUDA, which removes the
+> intermittent buffer artifacts the containerised ModernGL deployment suffered from.
+>
+> The public API is unchanged — `Renderer`, `CtxShot`, `ProjectionScene` and the pipeline
+> scripts keep their signatures. See [`docs/MIGRATION_REVIEW.md`](docs/MIGRATION_REVIEW.md)
+> for what changed and why, and [`test/README.md`](test/README.md) for the test suite.
+>
+> Equivalence with the ModernGL renderer is verified by an opt-in parity gate: mean absolute
+> error below one 8-bit level on every scene tested, with disagreements confined to coverage
+> boundaries. SharePoint support has been removed.
+
+## Quick start
+
+```bash
+# Install torch for your platform first; the CPU build is much smaller.
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
+pip install -e .
+
+pytest -q          # 150 tests, no GPU or GL driver required
+```
+
+Selecting a device:
+
+```python
+from alfspy.render.projection import ProjectionScene, ProjectionSettings
+
+with ProjectionScene(..., device="cuda") as scene:    # or "cpu"; defaults to CUDA if present
+    scene.project_orthographic(...)
+```
 
 ## Overview
 
@@ -121,14 +154,19 @@ renderer.project_shots(shots, RenderResultMode.ShotOnly, mask=mask)
 renderer.render_integral(shots, mask=mask, alpha_threshold=0.1)
 ```
 
-The integration uses additive blending on the GPU:
-```glsl
-// Fragment shader accumulates colors
-f_out_v4_color = vec4(texture(u_s2_tex, uv.xy).rgba);
-if (u_f_mask > 0.0) {
-    f_out_v4_color.rgba *= texture(u_s2_mask, uv.xy).r;
-}
+Integration accumulates additively into a tensor. The former fragment shader is now
+`alfspy.core.torchgl.programs.shade_shot`, which quotes the GLSL it replaces:
+
+```python
+uv = clip[:, :3] / w.unsqueeze(-1) / 2.0 + 0.5
+keep = (uv[:, 0] >= 0) & (uv[:, 0] <= 1) & (uv[:, 1] >= 0) & (uv[:, 1] <= 1)
+colour = texture.sample(uv[keep, 0], uv[keep, 1])
+if mask is not None:
+    colour = colour * mask.sample(uv[keep, 0], uv[keep, 1])[:, 0:1]
 ```
+
+The alpha channel doubles as an **overlap counter**: each contributing shot adds `1.0`, so
+dividing by alpha normalises each pixel by how many shots actually saw it.
 
 #### 4. Coordinate Conversion (`src/alfspy/core/convert/convert.py`)
 
@@ -315,10 +353,18 @@ docker run --rm \
   --name orthorenderer \
   -e INPUT_DIR="/input" \
   -e OUTPUT_DIR="/output" \
+  -e ALFS_DEVICE="cuda" \
   orthorender
 ```
 
-Note: There are problems with the combination of ModernGL and Xvfb, sometimes resulting in artifacts, probably due to incorrectly cleaned buffers, when having Alpha values next to the colors. This is sometimes (not always) a problem when rendering light field samples using the Docker approach.
+Note the image ships the **CPU** torch build by default, because the CUDA wheel adds roughly
+2 GB. For GPU rendering, drop the `--index-url .../whl/cpu` line from the `Dockerfile` and
+rebuild, or base the image on an `nvidia/cuda` runtime image.
+
+The image no longer installs `libx11`, `libxrandr`, `libxinerama`, `libxi`, `mesa` or
+`xvfb`, and the entry point no longer starts a virtual display before sleeping two seconds
+and hoping. The renderer never opens a GL context, so the ModernGL/Xvfb artifacts described
+in the previous version's *Known Limitations* no longer apply.
 
 ### Environment Variables
 
@@ -379,11 +425,31 @@ dataset/
 
 ## Known Limitations
 
-1. **Virtual Frame Buffer Artifacts**: When running via Xvfb in Docker, some virtual buffers may not be properly cleared with ModernGL, potentially causing transparency artifacts in ALFS mode. Orthographic projection is generally unaffected.
+1. **~~Virtual Frame Buffer Artifacts~~ — resolved.** The ModernGL/Xvfb transparency
+   artifacts are gone: there is no GL context, no driver-owned surface and no shared
+   framebuffer binding. Accumulators are tensors allocated per render call.
 
-2. **DEM Resolution**: Accuracy of geo-referencing depends on DEM resolution. High-resolution DEMs are recommended for best results.
+   The port also found a **second, host-side cause** of the same symptom that was present on
+   every platform: `render_integral` called `np.divide(..., where=mask)` without `out=`, so
+   every pixel below the alpha threshold held uninitialised heap memory rather than zeros.
+   That is fixed here, and the one-line fix is worth backporting to `alfs_py`. See
+   [`docs/MIGRATION_REVIEW.md` §3.1](docs/MIGRATION_REVIEW.md).
 
-3. **Correction Determination**: Manual correction factors must be determined per-flight through visual inspection of static object alignment.
+2. **CPU throughput.** A pure-torch rasteriser is slower than a GPU driver. A 30-shot ALFS
+   integral at 2048×2048 over a 131 k-triangle DEM takes about 7 s per output frame on CPU.
+   Use `device="cuda"` for production volumes; benchmark with
+   `python -m test.bench.bench_raster`.
+
+3. **DEM Resolution**: Accuracy of geo-referencing depends on DEM resolution. High-resolution DEMs are recommended for best results.
+
+4. **Correction Determination**: Manual correction factors must be determined per-flight through visual inspection of static object alignment.
+
+5. **~~Latent defects in the coordinate-conversion helpers~~ — resolved.** A batch of
+   long-standing bugs in `convert.py` and the label camera has been fixed in **both** this
+   project and `alfs_py`: the transposed ray rotation and its Euler-negating compensator, the
+   `world_to_pixel_coord` broadcast that only accepted 1 or 4 points, the never-working
+   orthographic ray branch, and the non-invertible `change_pixel_origin`. See
+   [`docs/MIGRATION_REVIEW.md` §9](docs/MIGRATION_REVIEW.md).
 
 ---
 

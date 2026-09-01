@@ -4,14 +4,16 @@ from typing import Optional, Any, Iterator
 
 import cv2
 import numpy as np
-from moderngl import VertexArray, Buffer, Texture, Program
+import torch
 from numpy.typing import NDArray
 
 from pyrr import Matrix44
 
 from alfspy.core.geo import Transform
+from alfspy.core.torchgl import TorchContext, TorchTexture, as_tensor
 
 f4_type = np.dtype('f4')
+
 
 @dataclass(frozen=True)
 class Resolution:
@@ -63,8 +65,23 @@ class TextureData:
         img = self.texture
         if img.max(initial=0.0) > 1.0:
             img = self.texture / 255.0
-        img = img[::-1, ...]  # flip image vertically for moderngl
+        img = img[::-1, ...]  # flip image vertically into GL bottom-up order
         return img.astype('f4').tobytes()
+
+    def to_tensor(self, device: Any = 'cpu', dtype: torch.dtype = torch.float32) -> torch.Tensor:
+        """
+        Returns the held texture as a tensor in the same layout ``to_bytes`` produces:
+        vertically flipped into GL bottom-up order with channel values in ``[0, 1]``.
+        :param device: The device to place the tensor on (defaults to the CPU).
+        :param dtype: The floating point dtype to use (defaults to ``torch.float32``).
+        :return: A ``(H, W, C)`` tensor representing the texture.
+        """
+        tensor = as_tensor(self.texture, device=torch.device(device), dtype=dtype)
+        if tensor.ndim == 2:
+            tensor = tensor.unsqueeze(-1)
+        if tensor.numel() and float(tensor.max()) > 1.0:
+            tensor = tensor / 255.0
+        return torch.flip(tensor, dims=(0,)).contiguous()
 
     @property
     def width(self) -> int:
@@ -76,7 +93,9 @@ class TextureData:
 
     def tex_gen_input(self) -> tuple[tuple[int, int], int, bytes]:
         """
-        Returns a tuple representing the required input for creating a ModernGL texture object via ``Context.texture``.
+        Returns a tuple representing the required input for creating a texture object.
+        Retained from the ModernGL version because lazy shot loading caches this tuple
+        ahead of upload; see ``AsyncShotLoader``.
         :return: Returns a tuple containing size, component count and a byte representation of the given texture.
         """
         return self.texture.shape[1::-1], self.texture.shape[2], self.to_bytes()
@@ -118,25 +137,37 @@ class TextureData:
 @dataclass
 class RenderObject:
     """
-    Class that represents an object that has already been loaded into VRAM.
-    :cvar vao: The associated vertex array.
-    :cvar vao_content: A tuple describing the content of the VAO.
-    :cvar vertex_buf: The associated buffer holding vertex positions.
-    :cvar uv_buf: The associated buffer holding vertex uv coordinates.
-    :cvar ibo: The associated buffer holding index data (optional).
-    :cvar tex: The associated texture buffer (optional).
+    Class that represents a mesh that has been uploaded to the render device.
+
+    The ModernGL version wrapped a VAO plus its vertex/uv/index buffers. The torch backend
+    has no vertex-array concept, so the same fields now hold plain tensors.
+
+    :cvar vertices: ``(V, 3)`` vertex position tensor.
+    :cvar indices: ``(T, 3)`` triangle index tensor (optional). When ``None`` vertices are
+        consumed as consecutive triples, matching ``GL_TRIANGLES`` without an index buffer.
+    :cvar uvs: ``(V, 2)`` vertex UV tensor (optional).
+    :cvar tex: The associated texture (optional).
+    :cvar transform: The model transform of this object (optional).
     """
-    vao: VertexArray
-    vao_content: list[tuple[Buffer, str, ...]]
-    vertex_buf: Buffer
-    uv_buf: Optional[Buffer] = None
-    ibo: Optional[Buffer] = None
-    tex: Optional[Texture] = None
+    vertices: torch.Tensor
+    indices: Optional[torch.Tensor] = None
+    uvs: Optional[torch.Tensor] = None
+    tex: Optional[TorchTexture] = None
     transform: Optional[Transform] = None
+
+    @property
+    def triangles(self) -> torch.Tensor:
+        """
+        :return: A ``(T, 3)`` index tensor, synthesised for non-indexed meshes.
+        """
+        if self.indices is not None:
+            return self.indices
+        count = self.vertices.shape[0] // 3
+        return torch.arange(count * 3, device=self.vertices.device, dtype=torch.int64).reshape(count, 3)
 
     def tex_use(self, location: int = 0) -> None:
         """
-        Binds the texture of this object to a texture unit
+        Binds the texture of this object to a texture unit.
         """
         if self.tex is not None:
             self.tex.use(location)
@@ -147,85 +178,64 @@ class RenderObject:
         else:
             return self.transform.mat(dtype)
 
-    def render(self, mode: Optional[int] = None) -> None:
-        """
-        Renders everything contained within the vertex array.
-        :param mode: The drawing mode to be used (defaults to mgl.TRIANGLES).
-        """
-        self.vao.render(mode)
-
     def release(self) -> None:
         """
         Releases all resources associated with this object.
-        :return:
         """
         if self.tex is not None:
             self.tex.release()
             self.tex = None
 
-        if self.ibo is not None:
-            self.ibo.release()
-            self.ibo = None
-
-            self.vertex_buf.release()
-            self.vao.release()
+        self.indices = None
+        self.uvs = None
+        self.vertices = torch.empty(0)
 
     @staticmethod
-    def from_mesh(prog: Program, mesh: MeshData, texture: Optional[TextureData] = None,
-                  vert_par: str = 'pos_in', uv_par: str = 'uv_in') -> 'RenderObject':
+    def from_mesh(ctx: TorchContext, mesh: MeshData,
+                  texture: Optional[TextureData] = None) -> 'RenderObject':
         """
-        Takes mesh data and converts into a ``RenderObject`` using the provided shader and its context,
-        loading all data into the buffers automatically.
-        :param prog: The shader program to attach all buffers to.
+        Takes mesh data and uploads it to the render device.
+
+        The ModernGL signature took a ``Program`` plus attribute names in order to build a
+        VAO; those arguments have no meaning in the torch backend and were dropped. This is
+        a backend-internal type -- ``Renderer`` is the public surface and is unchanged.
+
+        :param ctx: The context whose device the mesh should be uploaded to.
         :param mesh: The mesh data of the object to convert.
         :param texture: The texture data of the object to convert (optional).
-        :param vert_par: The name of the vertex position variable within the vertex shader (defaults to ``'pos_in'``).
-        :param uv_par: The name of the vertex uv coordinate variable within the vertex shader (defaults to ``'uv_in'``).
         :return: A ``RenderObject`` representing the given mesh data.
         """
-        ctx = prog.ctx
-        vao_content = []
+        device = ctx.device
+        dtype = ctx.dtype
 
-        vertices = mesh.vertices
-        if vertices.dtype != f4_type:
-            vertices = vertices.astype(f4_type)
-        vertex_buf = ctx.buffer(vertices.tobytes())
-        vao_content.append((vertex_buf, '3f4', vert_par))
-
+        vertices = as_tensor(np.ascontiguousarray(mesh.vertices, dtype=f4_type), device, dtype)
+        if vertices.ndim != 2 or vertices.shape[1] != 3:
+            raise ValueError(f'Mesh vertices must have shape (V, 3) but have {tuple(vertices.shape)}')
 
         if mesh.uvs is not None:
-            uvs = mesh.uvs
-            if uvs.dtype != f4_type:
-                uvs = uvs.astype(f4_type)
-            uv_buf = ctx.buffer(uvs.tobytes())
-            vao_content.append((uv_buf, '2f4', uv_par))
+            uvs = as_tensor(np.ascontiguousarray(mesh.uvs, dtype=f4_type), device, dtype)
         else:
-            uv_buf = None
+            uvs = None
 
         if mesh.indices is not None:
-            indices = mesh.indices
+            raw_indices = mesh.indices
 
-            if not np.issubdtype(indices.dtype, np.unsignedinteger):
-                raise TypeError(f'Mesh indices must be unsigned integers but are {indices.dtype.name}')
+            if not np.issubdtype(raw_indices.dtype, np.unsignedinteger):
+                raise TypeError(f'Mesh indices must be unsigned integers but are {raw_indices.dtype.name}')
 
-            index_element_size = indices.dtype.itemsize
+            index_element_size = raw_indices.dtype.itemsize
             if index_element_size not in (1, 2, 4):
                 raise ValueError('Mesh indices must be either 1, 2, or 4 bytes in size.')
 
-            ibo = ctx.buffer(indices.tobytes())
-            vao = ctx.vertex_array(prog, vao_content, index_buffer=ibo, index_element_size=4)
+            indices = as_tensor(
+                np.ascontiguousarray(raw_indices, dtype=np.int64).reshape(-1, 3), device, torch.int64
+            )
         else:
-            ibo = None
-            vao = ctx.vertex_array(prog, vao_content)
+            indices = None
 
-        if texture is not None:
-            tex_input = texture.tex_gen_input()
-            tex = ctx.texture(*tex_input, dtype='f4')  # TODO: throws exception when texture is too big -> cpp issue of moderngl
-        else:
-            tex = None
+        tex = TorchTexture(texture.texture, device=device, dtype=dtype) if texture is not None else None
 
-        obj = RenderObject(vao, vao_content, vertex_buf, uv_buf, ibo, tex)
-        return obj
+        return RenderObject(vertices, indices, uvs, tex, mesh.transform)
 
 
 class RenderResultMode(Enum):

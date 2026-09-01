@@ -29,10 +29,10 @@ MAX_BAD_FRACTION = 0.02  # at most 2% of values may exceed it
 @pytest.fixture(scope='module')
 def gl_ctx():
     """A ModernGL context shared by every golden case, skipped if no GL is available."""
-    moderngl = pytest.importorskip('moderngl')
+    pytest.importorskip('moderngl')
     try:
-        from alfspy.render.render import make_mgl_context
-        ctx = make_mgl_context()
+        from alfspy.core.backends.moderngl_ import create_context
+        ctx = create_context()
     except Exception as exc:  # pragma: no cover - depends on the machine, not the code
         pytest.skip(f'no OpenGL context available: {type(exc).__name__}: {exc}')
     yield ctx

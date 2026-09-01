@@ -26,7 +26,7 @@ from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import (
     make_camera,
-    make_mgl_context,
+    make_torch_context,
     make_shot_loader,
     process_render_data,
     read_gltf,
@@ -153,7 +153,7 @@ def main() -> None:
     mesh_aabb = get_aabb(mesh_data.vertices)
 
     # ── Create rendering context and shots ────────────────────────────────────
-    ctx = make_mgl_context()
+    ctx = make_torch_context()
     render_resolution = Resolution(RENDER_WIDTH, RENDER_HEIGHT)
 
     central_frame_num = FRAME_NUMBERS[0]

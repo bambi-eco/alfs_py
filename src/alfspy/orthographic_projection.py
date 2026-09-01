@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Set
 from pathlib import Path
 import cv2
-from moderngl import Context
+from alfspy.core.torchgl import TorchContext
 import numpy as np
 import logging
 import sys
@@ -57,7 +57,7 @@ from alfspy.core.rendering.renderer import Renderer
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
-from alfspy.render.render import make_camera, make_mgl_context, make_shot_loader, process_render_data, read_gltf, \
+from alfspy.render.render import make_camera, make_torch_context, make_shot_loader, process_render_data, read_gltf, \
     release_all
 
 
@@ -249,7 +249,7 @@ def get_frame_correction(corrections_data: dict, frame_idx: int, central_frame_i
 def get_shots_for_files(
         image_files: List[str],
         images_folder: str,
-        ctx: Context,
+        ctx: TorchContext,
         corrections_data: Dict[str, any],
         matched_poses: dict,
         lazy: bool = False,
@@ -444,8 +444,8 @@ def process_flight(
     tri_mesh = Trimesh(vertices=mesh_data.vertices, faces=mesh_data.indices)
     mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
-    # Create context
-    ctx = make_mgl_context()
+    # Create TorchContext
+    ctx = make_torch_context()
 
     # Get all shots for this flight
     shots, shot_names, shots_rotation_eulers, corrections, correction_eulers = get_shots_for_files(

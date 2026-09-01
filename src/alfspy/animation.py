@@ -4,7 +4,7 @@ from typing import List, Dict
 
 import cv2
 import numpy as np
-from moderngl import Context
+from alfspy.core.torchgl import TorchContext
 from pyrr import Vector3, Quaternion
 from trimesh import Trimesh
 
@@ -14,7 +14,7 @@ from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_eulers
 from alfspy.orthografic_projection import get_shots_for_files
 from alfspy.render.data import BaseSettings, CameraPositioningMode
-from alfspy.render.render import read_gltf, process_render_data, make_mgl_context, make_camera, make_shot_loader, \
+from alfspy.render.render import read_gltf, process_render_data, make_torch_context, make_camera, make_shot_loader, \
     release_all
 
 if __name__ == '__main__':
@@ -55,9 +55,9 @@ if __name__ == '__main__':
     # center_frame = [images[frame_idx]]
     # previous_frames = images[frame_idx - neighbor_range:frame_idx]
     # additional_frames = images[frame_idx + 1: frame_idx + 1 + neighbor_range]
-    # ctx = make_mgl_context()
+    # ctx = make_torch_context()
     #
-    # def get_shots_for_files(image_files: List[Dict[str, any]], images_folder: str, ctx: Context, correction: Transform, lazy: bool = False, fovy: float = 60.0):
+    # def get_shots_for_files(image_files: List[Dict[str, any]], images_folder: str, ctx: TorchContext, correction: Transform, lazy: bool = False, fovy: float = 60.0):
     #     shots = []
     #     shot_names = []
     #     shots_rotation_eulers = []

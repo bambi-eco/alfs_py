@@ -6,12 +6,12 @@ from logging import getLogger, Logger
 from typing import Optional, Iterable, Callable, Sequence, cast, Protocol, Union, TypeVar, Type, Final
 
 import cv2
-import moderngl as mgl
 import numpy as np
 from PIL import Image
 from numpy.typing import NDArray
 from pyrr import Quaternion, Vector3
 
+from alfspy.core.torchgl import TorchContext, create_context
 from alfspy.core.geo.aabb import AABB
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.camera import Camera
@@ -144,26 +144,40 @@ def process_render_data(mesh_data: Optional[MeshData],
             byte_size = texture_data.byte_size(dtype='f4')
 
         if byte_size > CPP_INT_MAX:
-            texture_data.scale_to_fit(CPP_INT_MAX, dtype='f4')  # necessary since moderngl uses this data type
+            # The torch backend has no such limit; the cap is retained so renders stay
+            # comparable to the ModernGL version, whose C++ layer sized buffers with `int`.
+            texture_data.scale_to_fit(CPP_INT_MAX, dtype='f4')
             logger.info(f'Texture downscaled to {texture_data.texture.shape[1::-1]} [{texture_data.byte_size("f4")} B] '
                         f'to fit size restriction of {CPP_INT_MAX} B')
 
     return mesh_data, texture_data
 
 
-def make_mgl_context(standalone:bool = True) -> mgl.Context:
+def make_torch_context(device: Optional[str] = None, **kwargs) -> TorchContext:
     """
-    Creates a ModernGL context. Ensures all examples use the same context settings.
-    :return: A ModernGL context instance.
+    Creates a render context. Ensures all pipelines use the same context settings.
+    :param device: The torch device to render on (optional). Defaults to CUDA when available.
+    :param kwargs: Forwarded to ``alfspy.core.torchgl.create_context``.
+    :return: A ``TorchContext`` instance with depth testing and back-face culling enabled.
     """
-    ctx = mgl.create_context(standalone=standalone)
-    ctx.enable(cast(int, mgl.DEPTH_TEST))
-    ctx.enable(cast(int, mgl.CULL_FACE))
-    ctx.cull_face = 'back'
-    return ctx
+    return create_context(device=device, **kwargs)
 
 
-def read_shots(json_file: str, ctx: mgl.Context, se: BaseSettings) -> list[CtxShot]:
+def make_mgl_context(standalone: bool = True, **kwargs) -> TorchContext:
+    """
+    Deprecated alias of ``make_torch_context``.
+
+    Retained so that scripts written against the ModernGL version keep running after only
+    swapping the import. The ``standalone`` flag has no meaning without a GL driver and is
+    ignored.
+    :param standalone: Ignored; accepted for signature compatibility.
+    :param kwargs: Forwarded to ``make_torch_context``.
+    :return: A ``TorchContext`` instance.
+    """
+    return make_torch_context(**kwargs)
+
+
+def read_shots(json_file: str, ctx: TorchContext, se: BaseSettings) -> list[CtxShot]:
     """
     Reads the shots from a JSON file and filters them according to the given settings.
     :param json_file: The shot JSON file.
@@ -253,13 +267,13 @@ def _ensure_or_copy_settings(se: Optional[S], cls: Type[S]) -> S:
 
 
 def _base_steps(gltf_file: str, shot_json_file: str, mask_file: Optional[str],
-                se: BaseSettings) -> tuple[mgl.Context, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
+                se: BaseSettings) -> tuple[TorchContext, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
     with LoggerStep(logger, f'Reading GLTF file from "{gltf_file}"'):
         mesh_data, texture_data = read_gltf(gltf_file)
         mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
-    with LoggerStep(logger, 'Creating MGL context'):
-        ctx = make_mgl_context()
+    with LoggerStep(logger, 'Creating render context'):
+        ctx = make_torch_context()
 
     with LoggerStep(logger,f'Extracting shots from "{shot_json_file}" (Creating lazy shots: {se.lazy})'):
         shots = read_shots(shot_json_file, ctx, se)

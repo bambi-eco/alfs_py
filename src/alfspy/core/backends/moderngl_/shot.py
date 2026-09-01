@@ -3,41 +3,33 @@ import pathlib
 from typing import Union, Final, Optional
 
 import cv2
+from moderngl import Context, Texture
 from numpy import deg2rad
 from numpy.typing import NDArray
 from pyrr import Vector3, Quaternion, Matrix44
 
 from alfspy.core.geo import Transform
-from alfspy.core.rendering import Camera
-from alfspy.core.rendering import TextureData
-from alfspy.core.torchgl import TorchContext, TorchTexture
+from alfspy.core.rendering.camera import Camera
+from alfspy.core.rendering.data import TextureData
 from alfspy.core.util.basic import get_first_valid
 from alfspy.core.util.defs import PATH_SEP
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 
 
 class CtxShot:
-    """
-    A single captured frame together with the camera pose it was taken from.
-
-    The class name and every public member are carried over from the ModernGL version; only
-    the texture type changed, from ``moderngl.Texture`` to
-    :class:`~alfspy.core.torchgl.texture.TorchTexture`.
-    """
-
     camera: Final[Camera]
     correction: Transform
     lazy: Final[bool]
 
     tex_data: Optional[TextureData]
-    tex: Optional[TorchTexture]
+    tex: Optional[Texture]
     _tex_gen_input: Optional[tuple[tuple[int, int], int, bytes]]
 
-    _ctx: Final[TorchContext]
+    _ctx: Final[Context]
     _img_file: Optional[str]
     _released: bool
 
-    def __init__(self, ctx: TorchContext, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
+    def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
                  fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None,
                  lazy: bool = False):
         """
@@ -96,8 +88,6 @@ class CtxShot:
     @staticmethod
     def _load_image_from_path(img_path: str) -> NDArray:
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-        if img is None:
-            raise FileNotFoundError(f'Could not read shot image "{img_path}"')
         return CtxShot._cvt_img(img)
 
     def create_anew(self) -> 'CtxShot':
@@ -129,23 +119,20 @@ class CtxShot:
 
     def load_tex_input(self):
         """
-        Determines and caches the input required to create a texture on the render device.
+        Determines and caches the input required to create a texture on the GPU.
         This data is released and removed when the texture gets initialized.
-
-        Kept as the pre-upload step ``AsyncShotLoader`` performs off the main thread. The
-        torch backend uploads from the array directly, so the cached bytes are no longer
-        forwarded; the call still forces the (expensive) image decode to happen in the worker.
         """
         self.load_image()
         if self._tex_gen_input is None:
             self._tex_gen_input = self.tex_data.tex_gen_input()
 
-    def _init_texture(self, ctx: Optional[TorchContext] = None):
+    def _init_texture(self):
         if self.tex is None and self._can_initialize:
-            self.load_image()
+            self.load_tex_input()
+            tex_gen_input = self._tex_gen_input
+            del self._tex_gen_input
             self._tex_gen_input = None
-            context = ctx if ctx is not None else self._ctx
-            self.tex = TorchTexture(self.tex_data.texture, device=context.device, dtype=context.dtype)
+            self.tex = self._ctx.texture(*tex_gen_input, dtype='f4')
 
     @property
     def width(self) -> Optional[int]:
@@ -182,7 +169,7 @@ class CtxShot:
 
     def release(self) -> None:
         """
-        Releases all objects associated with this shot.
+        Releases all objects associated with the given context.
         """
         if not self._released:
             if self.tex_data is not None:
@@ -194,34 +181,19 @@ class CtxShot:
                 del self.tex
                 self.tex = None
 
-            self._tex_gen_input = None
             self._released = True
 
     def tex_use(self, location: int = 0) -> None:
         """
-        Ensures the texture of this shot is resident and binds it to a texture unit.
+        Binds the texture of this object to a texture unit.
         """
-        self.get_texture()
-
-    def get_texture(self, ctx: Optional[TorchContext] = None) -> TorchTexture:
-        """
-        Returns this shot's texture, uploading it on first use.
-
-        Replaces the ModernGL ``tex_use`` / sampler-binding pair: the torch backend passes
-        textures to the shading functions explicitly rather than through global texture units.
-
-        :param ctx: The context to upload to (optional; defaults to the shot's own context).
-        :return: The texture associated with this shot.
-        """
-        if self._released:
-            raise RuntimeError(
-                'Shot cannot be used as it was initialized using image data and has already been released'
-            )
+        if self._released and not self._can_initialize:
+            raise RuntimeError('Shot cannot be used as it was initialized using image data and has already been released')
         if self.tex_data is None:
             self.load_image()
         if self.tex is None:
-            self._init_texture(ctx)
-        return self.tex
+            self._init_texture()
+        self.tex.use(location)
 
     def get_proj(self) -> Matrix44:
         """
@@ -248,9 +220,9 @@ class CtxShot:
         return self.camera.get_mat(dtype='f4') * self.get_correction()
 
     @staticmethod
-    def _process_json(data: dict, ctx: TorchContext, count: Optional[int] = None, image_dir: Optional[str] = None,
+    def _process_json(data: dict, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
                       fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) \
-            -> list[tuple[TorchContext, str, Vector3, Quaternion, float, float, Transform, bool]]:
+            -> list[tuple[Context, str, Vector3, Quaternion, float, float, Transform, bool]]:
         shot_params = []
 
         if count is not None:
@@ -288,7 +260,7 @@ class CtxShot:
         return shot_params
 
     @staticmethod
-    def from_json(file: str, ctx: TorchContext, count: Optional[int] = None, image_dir: Optional[str] = None,
+    def from_json(file: str, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
                   fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) -> list['CtxShot']:
         """
         Creates context shots from a JSON file.

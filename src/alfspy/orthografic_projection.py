@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 from pathlib import Path
 import cv2
-from moderngl import Context
+from alfspy.core.torchgl import TorchContext
 import numpy as np
 
 from alfspy.core.rendering import Resolution, Camera, CtxShot, RenderResultMode, TextureData
@@ -21,7 +21,7 @@ from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.loggings import LoggerStep
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
-from alfspy.render.render import make_camera, make_mgl_context, make_shot_loader, process_render_data, read_gltf, release_all
+from alfspy.render.render import make_camera, make_torch_context, make_shot_loader, process_render_data, read_gltf, release_all
 
 import logging
 import sys
@@ -59,7 +59,7 @@ def polyline_to_bounding_box(polyline: List[int]) -> Tuple[int, int, int, int]:
 #         label["label_id"] = label_id
 
 # Get shots for a list of image files
-def get_shots_for_files(image_files: List[str], images_folder: str, ctx: Context, corrections_data: Dict[str, any], matched_poses: dict, lazy: bool = False, fovy: float = 60.0, central_frame_idx: Optional[int] = None):
+def get_shots_for_files(image_files: List[str], images_folder: str, ctx: TorchContext, corrections_data: Dict[str, any], matched_poses: dict, lazy: bool = False, fovy: float = 60.0, central_frame_idx: Optional[int] = None):
     shots = []
     shot_names = []
     shots_rotation_eulers = []
@@ -257,7 +257,7 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
     tri_mesh = Trimesh(vertices=mesh_data.vertices, faces=mesh_data.indices)
     mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
-    ctx = make_mgl_context()
+    ctx = make_torch_context()
 
     shots, shot_names, shots_rotation_eulers, corrections, correction_eulers = get_shots_for_files(frame_files, images_folder, ctx, corrections_data, matched_poses)
 

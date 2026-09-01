@@ -1,26 +1,28 @@
-FROM python:3.10-slim
+# ALFS renderer, PyTorch backend.
+#
+# The ModernGL image needed libgl1-mesa-glx, the X11 dev headers and an Xvfb virtual display,
+# and it was that software-GL-under-Xvfb combination that produced the intermittent
+# transparency artifacts documented in docs/MIGRATION_REVIEW.md. None of it is needed now:
+# there is no GL driver, no X server and no DISPLAY.
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libx11-dev \
-    libxrandr-dev \
-    libxinerama-dev \
-    libxi-dev \
-    libgl1-mesa-glx \
+# OpenCV needs libGL for its own image codecs even in headless builds, plus libglib.
+# This is *not* a rendering dependency -- nothing here opens a GL context.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
     libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y xvfb
+# Install the CPU torch build explicitly. The default PyPI wheel pulls the full CUDA runtime
+# (~2 GB) even when no GPU is present. For GPU deployments, drop the --index-url line and
+# rebuild, or base the image on an nvidia/cuda runtime image.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install dependencies
-RUN pip install hatch
 COPY ./requirements.txt /app/requirements.txt
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-ENV DISPLAY=:99
 ENV INPUT_DIR=/input
 ENV OUTPUT_DIR=/output
 ENV SPLITS=train,val,test
@@ -47,10 +49,17 @@ ENV NMS_IOU=0.9
 ENV IS_THERMAL=1
 ENV USE_ONEFILE_CORRECTIONS=1
 
+# Selects the torch device. Leave unset to use CUDA when visible, otherwise CPU.
+ENV ALFS_DEVICE=""
+
 # Copy everything at once to maintain the project structure
 COPY . /app/
 
-RUN pip install .
+RUN pip install --no-cache-dir .
 
-# Run the script
-ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24+32 & sleep 2 && python src/alfspy/orthografic_projection.py"]
+# Sanity-check that the render backend imports and can rasterise, so a broken image fails at
+# build time rather than halfway through a dataset.
+RUN python -c "import alfspy.core.torchgl as t; print('torchgl ok', t.TORCH_VERSION, t.COMPAT_NOTES)"
+
+# No Xvfb, no DISPLAY, no sleep-and-hope startup.
+ENTRYPOINT ["python", "src/alfspy/orthografic_projection.py"]
