@@ -32,7 +32,7 @@ class CtxShot:
 
     def __init__(self, ctx: Context, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
                  fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None,
-                 lazy: bool = False):
+                 lazy: bool = False, normalise: bool = True):
         """
         Initializes a new ``CtxShot`` object
         :param ctx: The context the shot should be associated with.
@@ -45,8 +45,12 @@ class CtxShot:
         correction transform is inverted to make it move according to the background coordinate system.
         :param lazy: Whether the shot should be loaded lazily (defaults to ``False``). This also loads the image lazily
         from the drive when an image-file-path is given.
+        :param normalise: Whether values above 1 should be rescaled by 1/255 on upload
+        (defaults to ``True``, which is right for 8-bit imagery). Set ``False`` for an
+        N-channel feature field, whose activations carry no such scale.
         """
         self._released = False
+        self._normalise = normalise
 
         self.camera = Camera(fovy, aspect_ratio, position=position, rotation=rotation)
         if correction is None:
@@ -60,7 +64,7 @@ class CtxShot:
             self.tex_data = None
         else:
             self._img_file = None
-            self.tex_data = TextureData(img.copy())
+            self.tex_data = TextureData(img.copy(), normalise=normalise)
         self.lazy = lazy
         self.tex = None
         self._tex_gen_input = None
@@ -106,7 +110,8 @@ class CtxShot:
         When the shot was initialized using a file path, loads the associated image.
         """
         if self.tex_data is None and self._can_initialize:  # ensures img_file is set
-            self.tex_data = TextureData(self._load_image_from_path(str(self._img_file)))
+            self.tex_data = TextureData(self._load_image_from_path(str(self._img_file)),
+                                        normalise=self._normalise)
 
     def load_tex_input(self):
         """

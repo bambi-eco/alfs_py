@@ -49,17 +49,25 @@ class MeshData:
 class TextureData:
     """
     Class that represents a texture.
+
     :cvar texture: The texture data as a BGR or BGRA numpy array.
+    :cvar normalise: Whether to rescale values above 1 into [0, 1] by dividing by 255. Right
+        for 8-bit imagery, which is what this class was built for; wrong for anything else.
+        An N-channel feature field whose activations happen to exceed 1 would be silently
+        divided by 255, so the field path sets this to ``False``. (The original embedded
+        light field prototype dodged this by bypassing TextureData entirely -- and lost the
+        vertical flip below in the process, sampling every shot mirrored.)
     """
     texture: NDArray
+    normalise: bool = True
 
     def to_bytes(self) -> bytes:
         """
-        Returns a byte representation of the held texture. Ensures percentage channel values.
+        Returns a byte representation of the held texture.
         :return: Bytes representing the texture.
         """
         img = self.texture
-        if img.max(initial=0.0) > 1.0:
+        if self.normalise and img.max(initial=0.0) > 1.0:
             img = self.texture / 255.0
         img = img[::-1, ...]  # flip image vertically into GL bottom-up order
         return img.astype('f4').tobytes()
@@ -86,7 +94,7 @@ class TextureData:
         tensor = as_tensor(self.texture, device=torch.device(device), dtype=dtype)
         if tensor.ndim == 2:
             tensor = tensor.unsqueeze(-1)
-        if tensor.numel() and float(tensor.max()) > 1.0:
+        if self.normalise and tensor.numel() and float(tensor.max()) > 1.0:
             tensor = tensor / 255.0
         return torch.flip(tensor, dims=(0,)).contiguous()
 

@@ -33,7 +33,7 @@ class CtxShot(metaclass=ABCMeta):
 
     def __new__(cls, ctx, img: Union[str, NDArray], position: Vector3, rotation: Quaternion,
                 fovy: float = 60.0, aspect_ratio: float = 1, correction: Optional[Transform] = None,
-                lazy: bool = False):
+                lazy: bool = False, normalise: bool = True):
         """
         Initializes a new shot for the backend that owns ``ctx``.
 
@@ -46,11 +46,14 @@ class CtxShot(metaclass=ABCMeta):
         :param aspect_ratio: The aspect ratio of the view (defaults to 1).
         :param correction: Correction transform to be applied to the shot (optional).
         :param lazy: Whether the shot should be loaded lazily (defaults to ``False``).
+        :param normalise: Whether values above 1 should be rescaled by 1/255 on upload
+            (defaults to ``True``). Set ``False`` for an N-channel feature field.
         :return: A backend-specific shot.
         """
         impl = backend_for_context(ctx).CtxShot
         CtxShot.register(impl)
-        return impl(ctx, img, position, rotation, fovy, aspect_ratio, correction, lazy)
+        return impl(ctx, img, position, rotation, fovy, aspect_ratio, correction, lazy,
+                    normalise)
 
     @staticmethod
     def _cvt_img(img: NDArray) -> NDArray:
