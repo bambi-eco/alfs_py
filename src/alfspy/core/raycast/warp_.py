@@ -1,6 +1,6 @@
 """GPU ray casting through NVIDIA Warp.
 
-Optional; install with ``pip install "AlfsPy[raycast-gpu]"``.
+Optional; install with ``pip install "AlfsPy[warp]"``.
 
 Whether this is worth selecting depends entirely on ray count. Measured on a 131k-triangle
 DEM (RTX 500 Ada laptop, CUDA; timings include host<->device transfer):

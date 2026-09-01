@@ -15,13 +15,50 @@ Two things distinguish version 3:
 
 ## Quick start
 
-No render backend is installed by default — pick at least one:
+No render backend is installed by default — pick at least one, or take everything:
 
 ```bash
 pip install "AlfsPy[moderngl]"    # OpenGL. Needs a GL driver.
 pip install "AlfsPy[torch]"       # Tensor rasteriser. CPU or CUDA, no driver needed.
 pip install "AlfsPy[vulkan]"      # Vulkan via WebGPU. Needs Python >= 3.11.
+
+pip install "AlfsPy[all]"         # every optional feature (large: a few GB)
+pip install "AlfsPy[dev]"         # all + pytest, so the suite runs without skipping
 ```
+
+Extras combine, so `pip install "AlfsPy[moderngl,torch]"` gives you both engines.
+
+### All extras
+
+| Extra | Brings | For |
+|---|---|---|
+| `moderngl` | `moderngl` | the OpenGL backend |
+| `torch` | `torch` | the PyTorch backend |
+| `vulkan` | `wgpu` | the Vulkan backend (no-op below Python 3.11) |
+| `embedding` | `torch`, `transformers`, `scikit-learn` | DINOv3 extraction, PCA reduction |
+| `umap` | `umap-learn` | UMAP reduction. Separate because it drags in numba and llvmlite |
+| `warp` | `warp-lang` | GPU ray casting |
+| `embree` | `Rtree`, `embreex` | pins the default ray caster; **already included** (see below) |
+| `all` | everything above | |
+| `dev` | `all` + `pytest` | running the full suite |
+
+The extra names match the values you pass at runtime, so `AlfsPy[torch]` goes with
+`engine='torch'` and `AlfsPy[warp]` with `raycaster='warp'`. (`accel` and `raycast-gpu` are
+the 3.0/3.1 names for `embree` and `warp`, kept as aliases.)
+
+### Do I need to choose a ray caster at install time?
+
+**Only if you want `warp`.** The default, `embree`, works out of the box: `trimesh[easy]` is
+a base dependency and already pulls `embreex` and `rtree`, so a bare `pip install AlfsPy`
+gives you accelerated ray casting. The `embree` extra only pins them explicitly and changes
+nothing today.
+
+That matters because the fallback is a trap rather than merely slow: without `embreex`,
+trimesh silently drops to a pure-Python intersector that returns hits in a *different index
+order*. `EmbreeRayCaster.accelerated` tells you which one is live.
+
+`warp` is worth installing only if you cast far more rays than label projection does — see
+[Ray casting](#ray-casting) for the measured crossover.
 
 ```python
 from alfspy import render_integral, ProjectionScene, make_context, available_engines
@@ -324,8 +361,12 @@ ProjectionScene(dem, poses, correction, raycaster='warp')    # or $ALFS_RAYCASTE
 | 4.2M (2048² dense) | 1.810 s | 0.085 s |
 
 Label projection casts tens of rays per frame, so the GPU backend cannot win there; it is for
-bulk work. **Install `AlfsPy[accel]`** — without embreex, trimesh falls back to a pure-Python
-intersector that is not merely ~85× slower but returns hits in a different index order.
+bulk work, and `AlfsPy[warp]` is the only ray-caster extra you would ever need to add.
+
+`embree` needs no extra — it arrives with the base install via `trimesh[easy]`. Check it is
+actually active with `EmbreeRayCaster.accelerated`: without `embreex`, trimesh falls back to a
+pure-Python intersector that is not merely ~85× slower but returns hits in a different index
+order, and says nothing about it.
 
 ---
 

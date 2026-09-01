@@ -63,7 +63,8 @@ def get_raycaster(name: str):
     :return: The ``RayCaster`` subclass.
     :raises ValueError: If no ray caster is registered under that name.
     :raises ImportError: If its dependency is not installed, with a message naming the extra
-        that provides it.
+        that provides it -- the extra is named after the caster, as the engine extras are
+        named after the engines.
     """
     if name not in _MODULES:
         raise ValueError(
@@ -73,7 +74,7 @@ def get_raycaster(name: str):
     except ImportError as exc:
         raise ImportError(
             f'The {name!r} ray caster is registered but its dependency is not installed. '
-            f'Install it with `pip install "AlfsPy[raycast-gpu]"`. Original error: {exc}'
+            f'Install it with `pip install "AlfsPy[{name}]"`. Original error: {exc}'
         ) from exc
     return getattr(module, _CLASSES[name])
 

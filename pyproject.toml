@@ -7,7 +7,7 @@ packages = ["src/alfspy"]
 
 [project]
 name = "AlfsPy"
-version = "3.1.0"
+version = "3.2.0"
 description = "Renderer for airborne light-field sampling data with pluggable ModernGL, PyTorch and Vulkan backends"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -60,10 +60,14 @@ vulkan = [
     "wgpu>=0.32; python_version >= '3.11'",
 ]
 
-# Accelerated ray/mesh intersection for label projection. Without these, trimesh silently
-# falls back to its pure-Python intersector, which is not merely slow -- it returns hits in a
-# different index order.
-accel = [
+# Ray casters. The default, `embree`, needs no extra: `trimesh[easy]` is a base dependency
+# and already pulls embreex and rtree. This extra only pins them explicitly, as insurance
+# against trimesh dropping them from `easy` -- installing it changes nothing today.
+#
+# It matters that embreex is present: without it trimesh silently falls back to a
+# pure-Python intersector that is not merely ~85x slower but returns hits in a *different
+# index order*. `EmbreeRayCaster.accelerated` reports which one is live.
+embree = [
     "Rtree>=1.0",
     "embreex>=2.17; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
 ]
@@ -71,9 +75,14 @@ accel = [
 # GPU ray casting via NVIDIA Warp. Worth it above roughly 1e4 rays per call; below that,
 # launch and transfer overhead mean it only ties embree. Label projection casts tens of rays
 # per frame, so this is for bulk work rather than the default pipeline.
-raycast-gpu = [
+warp = [
     "warp-lang>=1.0",
 ]
+
+# Older names for the two above, kept so 3.0/3.1 install commands keep working. The extra
+# names now match the `raycaster=` values, as the engine extras match the `engine=` values.
+accel = ["AlfsPy[embree]"]
+raycast-gpu = ["AlfsPy[warp]"]
 
 # Embedded light fields: DINOv3 descriptor extraction and the reducers that make a
 # 1280-channel field viewable. torch comes via the `torch` extra, which this implies --
@@ -92,6 +101,25 @@ umap = [
 
 test = [
     "pytest>=7.0",
+]
+
+# Everything optional. Large: torch and transformers alone are a couple of GB, and umap-learn
+# brings numba and llvmlite. `vulkan` carries a python_version marker, so on 3.9/3.10 it
+# simply resolves to nothing rather than failing.
+all = [
+    "AlfsPy[moderngl]",
+    "AlfsPy[torch]",
+    "AlfsPy[vulkan]",
+    "AlfsPy[embree]",
+    "AlfsPy[warp]",
+    "AlfsPy[embedding]",
+    "AlfsPy[umap]",
+]
+
+# Everything plus the test dependencies: what the full suite needs to run without skipping.
+dev = [
+    "AlfsPy[all]",
+    "AlfsPy[test]",
 ]
 
 [project.scripts]

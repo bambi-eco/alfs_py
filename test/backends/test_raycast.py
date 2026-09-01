@@ -174,8 +174,12 @@ def test_unknown_raycaster_is_rejected():
 
 
 def test_missing_backend_names_its_extra():
+    """
+    The extra is named after the caster, so the error message is directly actionable:
+    `raycaster='warp'` failing tells you to install `AlfsPy[warp]`.
+    """
     for name in raycaster_names():
         try:
             get_raycaster(name)
         except ImportError as exc:
-            assert 'AlfsPy[raycast-gpu]' in str(exc)
+            assert f'AlfsPy[{name}]' in str(exc)
