@@ -8,11 +8,16 @@ projections and carries 2D labels through either transform.
 The renderer has three interchangeable backends. Which one you get is decided by the render
 context, so nothing else in the API changes with it::
 
-    from alfspy import create_context, render_integral
+    from alfspy import make_context, render_integral
 
     render_integral(dem, poses, mask, engine='moderngl')   # OpenGL; needs a GL driver
     render_integral(dem, poses, mask, engine='torch')      # tensor rasteriser; headless
     render_integral(dem, poses, mask, engine='vulkan')     # WebGPU -> Vulkan; headless
+
+Contexts come from one factory whose signature is identical for every backend, so only the
+engine argument changes the result::
+
+    ctx = make_context('torch', device='cuda')
 
 ``$ALFS_ENGINE`` sets the default. Backends are optional extras -- ``AlfsPy[moderngl]``,
 ``AlfsPy[torch]``, ``AlfsPy[vulkan]`` -- and are imported lazily, so importing this package
@@ -31,6 +36,7 @@ from alfspy.core.backends import (
     backend_for_context,
     create_context,
     engine_names,
+    make_context,
     resolve_engine,
 )
 from alfspy.core.raycast import available_raycasters, create_raycaster
@@ -50,6 +56,7 @@ __version__ = '3.0.0'
 __all__ = [
     '__version__',
     # backend selection
+    'make_context',
     'create_context',
     'available_engines',
     'engine_names',

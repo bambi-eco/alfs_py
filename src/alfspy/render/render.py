@@ -1,4 +1,5 @@
 import os
+import warnings
 from collections import defaultdict
 from copy import copy
 from functools import cache
@@ -11,7 +12,7 @@ from PIL import Image
 from numpy.typing import NDArray
 from pyrr import Quaternion, Vector3
 
-from alfspy.core.backends import create_context as backend_create_context
+from alfspy.core.backends import make_context as backend_make_context
 from alfspy.core.backends import resolve_engine
 from alfspy.core.torchgl import TorchContext, create_context
 from alfspy.core.geo.aabb import AABB
@@ -155,30 +156,60 @@ def process_render_data(mesh_data: Optional[MeshData],
     return mesh_data, texture_data
 
 
+def make_context(engine: Optional[str] = None, device: Optional[str] = None, **options):
+    """
+    Creates a render context in the pipeline's standard state.
+
+    One factory for every backend: only ``engine`` changes what you get. Each backend honours
+    the options that apply to it and ignores the rest, so switching engines does not mean
+    rewriting the call.
+
+        make_context()                              # $ALFS_ENGINE, or the default
+        make_context('torch', device='cuda')
+        make_context('vulkan', device='cpu')        # software adapter
+        make_context('moderngl', backend='egl')     # headless Linux GL
+
+    :param engine: The backend to use -- ``"moderngl"``, ``"torch"`` or ``"vulkan"``
+        (optional). Defaults to ``$ALFS_ENGINE`` and then to the library default.
+    :param device: Which device to render on, e.g. ``"cpu"`` or ``"cuda"`` (optional).
+    :param options: Backend-specific extras; unknown keys are ignored.
+    :return: A render context for the selected backend.
+    """
+    return backend_make_context(engine, device=device, **options)
+
+
 def make_torch_context(device: Optional[str] = None, **kwargs) -> TorchContext:
     """
-    Creates a render context. Ensures all pipelines use the same context settings.
-    :param device: The torch device to render on (optional). Defaults to CUDA when available.
-    :param kwargs: Forwarded to ``alfspy.core.torchgl.create_context``.
-    :return: A ``TorchContext`` instance with depth testing and back-face culling enabled.
+    Deprecated. Use ``make_context('torch', device=...)``.
+
+    :param device: The torch device to render on (optional).
+    :param kwargs: Forwarded to the torch backend.
+    :return: A ``TorchContext`` instance.
     """
-    return create_context(device=device, **kwargs)
+    warnings.warn(
+        "make_torch_context is deprecated; use make_context('torch', device=...) instead. "
+        'One factory serves every backend, so only the engine argument differs.',
+        DeprecationWarning, stacklevel=2)
+    return make_context('torch', device=device, **kwargs)
 
 
 def make_mgl_context(standalone: bool = True, **kwargs):
     """
-    Creates a ModernGL context.
+    Deprecated. Use ``make_context('moderngl')``.
 
-    Between the PyTorch port and the backend merge this was an alias that silently returned a
-    ``TorchContext``, which made it a trap: code asking for GL got a tensor rasteriser. Now
-    that both backends exist it does what its name says. Prefer
-    ``alfspy.core.backends.create_context(engine=...)`` for new code.
+    Between the PyTorch port and the backend merge this silently returned a ``TorchContext``,
+    which made it a trap: code asking for GL got a tensor rasteriser. It returns an OpenGL
+    context again, and is kept only so existing scripts keep working.
 
     :param standalone: Whether to create a standalone (windowless) context.
-    :param kwargs: Forwarded to the ModernGL backend's ``create_context``.
+    :param kwargs: Forwarded to the ModernGL backend.
     :return: A ModernGL context.
     """
-    return backend_create_context(engine='moderngl', standalone=standalone, **kwargs)
+    warnings.warn(
+        "make_mgl_context is deprecated; use make_context('moderngl') instead. "
+        'One factory serves every backend, so only the engine argument differs.',
+        DeprecationWarning, stacklevel=2)
+    return make_context('moderngl', standalone=standalone, **kwargs)
 
 
 def read_shots(json_file: str, ctx: TorchContext, se: BaseSettings) -> list[CtxShot]:
@@ -278,7 +309,7 @@ def _base_steps(gltf_file: str, shot_json_file: str, mask_file: Optional[str],
         mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
     with LoggerStep(logger, f'Creating render context (engine: {resolve_engine(engine)})'):
-        ctx = backend_create_context(engine=engine)
+        ctx = make_context(engine)
 
     with LoggerStep(logger,f'Extracting shots from "{shot_json_file}" (Creating lazy shots: {se.lazy})'):
         shots = read_shots(shot_json_file, ctx, se)

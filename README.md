@@ -1,97 +1,163 @@
-# Python based Airborne Light Field Sampling and Orthographic Projection
+# AlfsPy — Airborne Light Field Sampling and Orthographic Projection
 
-A Python-based framework for Airborne Light-Field Sampling (ALFS) data visualization and orthographic projection of geo-referenced drone footage, implemented via **PyTorch**.
+A Python framework for Airborne Light-Field Sampling (ALFS) and orthographic projection of
+geo-referenced drone footage, with **three interchangeable render backends**: OpenGL
+(ModernGL), a pure-PyTorch tensor rasteriser, and Vulkan (via WebGPU).
 
-> **This is the PyTorch port of ALFSPy.** The rendering backend no longer uses OpenGL:
-> there is no ModernGL, no GL driver, no X server and no Xvfb. Rendering runs on a
-> tensor-based rasteriser (`alfspy.core.torchgl`) on CPU or CUDA, which removes the
-> intermittent buffer artifacts the containerised ModernGL deployment suffered from.
->
-> The public API is unchanged — `Renderer`, `CtxShot`, `ProjectionScene` and the pipeline
-> scripts keep their signatures. See [`docs/MIGRATION_REVIEW.md`](docs/MIGRATION_REVIEW.md)
-> for what changed and why, and [`test/README.md`](test/README.md) for the test suite.
->
-> Equivalence with the ModernGL renderer is verified by an opt-in parity gate: mean absolute
-> error below one 8-bit level on every scene tested, with disagreements confined to coverage
-> boundaries. SharePoint support has been removed.
+Two things distinguish version 3:
+
+- **The renderer is pluggable.** The same code renders through OpenGL, PyTorch or Vulkan.
+  Two of the three need no GL driver and no X server, so headless and containerised
+  deployment does not need Xvfb.
+- **A light field is not limited to three channels.** Feed the integral dense visual
+  descriptors instead of colour and you get an *embedded light field*, whose every pixel
+  carries a 1280-dimensional feature vector.
 
 ## Quick start
 
-```bash
-# Install torch for your platform first; the CPU build is much smaller.
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt
-pip install -e .
+No render backend is installed by default — pick at least one:
 
-pytest -q          # 150 tests, no GPU or GL driver required
+```bash
+pip install "AlfsPy[moderngl]"    # OpenGL. Needs a GL driver.
+pip install "AlfsPy[torch]"       # Tensor rasteriser. CPU or CUDA, no driver needed.
+pip install "AlfsPy[vulkan]"      # Vulkan via WebGPU. Needs Python >= 3.11.
 ```
 
-Selecting a device:
-
 ```python
-from alfspy.render.projection import ProjectionScene, ProjectionSettings
+from alfspy import render_integral, ProjectionScene, make_context, available_engines
 
-with ProjectionScene(..., device="cuda") as scene:    # or "cpu"; defaults to CUDA if present
-    scene.project_orthographic(...)
+print(available_engines())        # ['moderngl', 'torch', 'vulkan'] — whatever works here
+
+render_integral(dem_file, poses_file, mask_file, engine='torch')
+
+with ProjectionScene(dem_file, poses_file, correction_file, engine='vulkan') as scene:
+    scene.project_orthographic('frame_002120.png', output_image='ortho.png')
+```
+
+`$ALFS_ENGINE` sets the default when no `engine=` is given. Importing `alfspy` pulls in none
+of the backends; each is imported only when selected.
+
+```bash
+pytest -q     # Tests needing an unavailable backend, device or dependency skip rather
+              # than fail, so a minimal install still gives a green run.
 ```
 
 ## Overview
 
-This framework provides tools for processing and rendering (drone-based thermal and RGB) imagery with two primary rendering modes:
+The framework has two rendering modes:
 
-1. **Orthographic Projection**: Generates top-down, orthorectified views of captured footage by projecting image data onto a Digital Elevation Model (DEM)
-2. **Airborne Light Field Sampling (ALFS)**: Synthesizes novel views by integrating multiple overlapping drone captures, enabling reconstruction-free radiance field rendering
+1. **Orthographic Projection** — top-down, orthorectified views produced by projecting each
+   frame onto a Digital Elevation Model.
+2. **Airborne Light Field Sampling (ALFS)** — novel views synthesised by integrating several
+   overlapping captures, without any 3D reconstruction.
 
+Both carry 2D bounding-box labels through the same transform, which is what makes the output
+usable as detection training data.
 
 ---
 
-## Theoretical Background
+## Theoretical background
 
-### Airborne Light Field Sampling (ALFS)
+### Airborne Light Field Sampling
 
-Traditional approaches to generating novel aerial views typically require extensive 3D reconstruction through photogrammetry or neural radiance fields. ALFS offers a reconstruction-free alternative that directly synthesizes views from captured drone imagery.
+Generating novel aerial views normally means photogrammetry or a neural radiance field. ALFS
+is a reconstruction-free alternative: a drone flight already captures overlapping views of
+the same ground from many positions, and projective geometry is enough to combine them.
 
-#### Core Concept
+For each pixel of the output the renderer:
 
-The ALFS approach operates on the principle that drone flight paths can be designed to capture overlapping views of a scene from multiple positions. When these captures are combined using projective geometry, novel viewpoints can be synthesized without explicit 3D reconstruction.
+1. **casts a ray** from the virtual camera through the pixel into the scene,
+2. **intersects** it with the DEM to find the world-space point,
+3. **projects** that point back into every source image through the inverse camera matrices,
+4. **samples** the colour wherever the projection lands inside the frame,
+5. **averages** the samples, dividing by how many frames actually saw that point.
 
-The key insight is that by:
-1. Projecting each captured image onto a known terrain surface (DEM)
-2. Integrating the contributions from multiple overlapping shots
-3. Rendering from a virtual camera position
+Step 5 is why coverage matters: a pixel seen by eight frames and a pixel seen by one must not
+be averaged the same way.
 
-...we can generate high-quality novel views that preserve the visual characteristics of the original captures.
+### Orthographic projection
 
-#### Mathematical Foundation
+An orthographic view has no perspective divergence, so parallel lines stay parallel and a
+metre is the same number of pixels everywhere in the image. That makes it suited to mapping,
+size estimation, and generating detection datasets with a consistent scale.
 
-For each pixel in the output image, the rendering process:
+The orthographic camera is defined by its position, its size in world units (metres) and the
+output resolution.
 
-1. **Casts a ray** from the virtual camera through the pixel into the scene
-2. **Intersects** the ray with the Digital Elevation Model to find the world-space point
-3. **Projects** this world-space point back into each source image using the inverse camera matrices
-4. **Samples** the color from each source image where valid
-5. **Integrates** the samples using additive blending with normalization
+---
 
+## Render backends
 
-### Orthographic Projection
+All three implement the same three GPU operations — render the textured DEM, project a shot
+onto it, integrate several shots — and produce the same picture.
 
-Orthographic projection provides a distortion-free, top-down view of the captured scene. Unlike perspective projection, parallel lines remain parallel in orthographic projection, making it ideal for:
+| | `moderngl` | `torch` | `vulkan` |
+|---|---|---|---|
+| API | OpenGL 3.3 | pure tensor ops | WebGPU → Vulkan/Metal/DX12 |
+| Needs a GL driver | yes | no | no |
+| Headless | needs Xvfb | native | native |
+| Devices | GPU | CPU or CUDA | GPU |
+| Python | >= 3.9 | >= 3.9 | **>= 3.11** |
 
-- Geographic mapping and analysis
-- Consistent size measurements across the image
-- Wildlife detection dataset preparation
-- Integration with GIS systems
+### Choosing one
 
-The orthographic camera is defined by:
-- **Position**: Center point above the scene
-- **Orthographic Size**: Width and height in world units (meters)
-- **Resolution**: Output image dimensions in pixels
+```python
+render_integral(dem, poses, mask, engine='vulkan')     # per call
+```
+
+```bash
+export ALFS_ENGINE=torch                                # per process
+```
+
+Contexts come from **one factory whose signature is identical for every backend**, so only
+the engine argument changes what you get — switching engines never means rewriting the call:
+
+```python
+from alfspy import make_context
+
+make_context()                            # $ALFS_ENGINE, or the default
+make_context('torch', device='cuda')
+make_context('vulkan', device='cpu')      # software adapter
+make_context('moderngl', backend='egl')   # headless Linux GL
+```
+
+Each backend honours the options that apply to it and ignores the rest, so an option meant
+for one engine does not raise on another. `device` is accepted everywhere: torch uses it
+directly, Vulkan maps `"cpu"` onto the software fallback adapter, and ModernGL ignores it
+because OpenGL offers no device selection.
+
+The context *is* the engine handle, so passing one selects the backend and every existing
+call site keeps working unchanged:
+
+```python
+ctx = make_context('torch', device='cuda')
+renderer = Renderer(resolution, ctx, camera, mesh)      # same signature as always
+```
+
+`make_mgl_context` and `make_torch_context` still work but are deprecated; they warn and
+delegate to `make_context`.
+
+`available_engines()` probes rather than guesses: `moderngl` imports successfully on a machine
+with no usable GL driver and only fails when a context is created.
+
+### How closely they agree
+
+Verified against golden fixtures captured from the OpenGL renderer:
+
+- **Vulkan** reproduces them essentially bit for bit — the three-shot integral is exactly
+  identical, the rest differ by a mean absolute error of at most 0.12 of 255 with a maximum
+  deviation of 2.
+- **PyTorch** differs by a mean absolute error of 0.24–0.85 of 255, with 0.4–1.3% of values
+  off by more than 8 and coverage differing on at most 0.01% of pixels. It is a rasteriser
+  written from scratch rather than a driver, so it breaks rasterisation ties and rounds
+  texture filtering differently; disagreements are confined to coverage boundaries.
+
+A cross-engine test suite renders every golden case through every available backend and
+compares both pixels and coverage.
 
 ---
 
 ## Architecture
-
-### Pipeline Overview
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
@@ -107,203 +173,189 @@ The orthographic camera is defined by:
    └─────────┘           └───────────┘
 ```
 
-### Core Components
-
-#### 1. Camera System (`src/alfspy/core/rendering/camera.py`)
-
-The camera system supports both perspective and orthographic projections:
-
-```python
-class Camera:
-    def __init__(self, 
-                 fovy: float = 60.0,           # Field of view (perspective)
-                 aspect_ratio: float = 1.0,     # Width/height ratio
-                 orthogonal: bool = False,      # Enable orthographic mode
-                 orthogonal_size: tuple = (16, 16),  # World-space dimensions
-                 near: float = 0.1,             # Near clipping plane
-                 far: float = 10000,            # Far clipping plane
-                 position: Vector3 = ...,       # Camera position
-                 rotation: Quaternion = ...)    # Camera orientation
+```
+src/alfspy/
+  core/
+    rendering/     Camera, Resolution, MeshData, TextureData — no device state
+    backends/      moderngl_/  torch_/  wgpu_/  + the registry
+    raycast/       embree (default) and warp
+    geo/ convert/ util/
+  render/          render_integral, ProjectionScene, render_field_integral
+  embedding/       DINOv3 extraction and the field reducers
+  io/              N-channel field storage
 ```
 
-#### 2. Shot Representation (`src/alfspy/core/rendering/shot.py`)
-
-Each captured image is represented as a `CtxShot` containing:
-- **Camera parameters**: Position, rotation, field of view
-- **Image data**: Texture for GPU rendering
-- **Correction transform**: Compensates for GPS/IMU drift
+### Camera (`core/rendering/camera.py`)
 
 ```python
-class CtxShot:
-    camera: Camera              # Source camera parameters
-    correction: Transform       # Position/rotation correction
-    tex: Texture               # GPU texture handle
+Camera(fovy=60.0,                  # vertical field of view, degrees (perspective)
+       aspect_ratio=1.0,
+       orthogonal=False,
+       orthogonal_size=(16, 16),   # full width/height in world units
+       near=0.1, far=10000,
+       position=Vector3(...), rotation=Quaternion(...))
 ```
 
-#### 3. Renderer (`src/alfspy/core/rendering/renderer.py`)
+### Shot (`core/rendering/shot.py`)
 
-The GPU-accelerated renderer handles both single-shot projection and multi-shot integration:
+One captured frame plus the camera pose it was taken from, and a correction transform for
+GPS/IMU drift. `CtxShot` dispatches on the context it is given, so the same call builds an
+OpenGL texture, a tensor or a WebGPU texture.
 
-**Single Shot Projection**:
+### Renderer (`core/rendering/renderer.py`)
+
+A facade that dispatches to the backend owning the context.
+
 ```python
 renderer.project_shots(shots, RenderResultMode.ShotOnly, mask=mask)
-```
-
-**Light Field Integration**:
-```python
 renderer.render_integral(shots, mask=mask, alpha_threshold=0.1)
+result = renderer.render_integral_raw(shots, mask=mask)   # unnormalised
 ```
 
-Integration accumulates additively into a tensor. The former fragment shader is now
-`alfspy.core.torchgl.programs.shade_shot`, which quotes the GLSL it replaces:
+`render_integral_raw` returns an `IntegralResult` carrying the accumulated samples and the
+per-pixel coverage **separately**:
 
 ```python
-uv = clip[:, :3] / w.unsqueeze(-1) / 2.0 + 0.5
-keep = (uv[:, 0] >= 0) & (uv[:, 0] <= 1) & (uv[:, 1] >= 0) & (uv[:, 1] <= 1)
-colour = texture.sample(uv[keep, 0], uv[keep, 1])
-if mask is not None:
-    colour = colour * mask.sample(uv[keep, 0], uv[keep, 1])[:, 0:1]
+result.accum        # (H, W, C) float32 — summed contributions
+result.coverage     # (H, W)    float32 — how many shots saw each pixel
+result.normalised(threshold=0.1)
 ```
 
-The alpha channel doubles as an **overlap counter**: each contributing shot adds `1.0`, so
-dividing by alpha normalises each pixel by how many shots actually saw it.
+Coverage used to be the accumulated alpha channel. Keeping it separate is what lets a light
+field carry data in all four channels, and it means `alpha_threshold` thresholds an actual
+overlap count rather than an opacity that happens to correlate with one.
 
-#### 4. Coordinate Conversion (`src/alfspy/core/convert/convert.py`)
+### Coordinate conversion (`core/convert/convert.py`)
 
-Bidirectional conversion between pixel and world coordinates:
-
-**Pixel → World**:
 ```python
-world_coords = pixel_to_world_coord(
-    x, y,                    # Pixel coordinates
-    width, height,           # Image dimensions
-    mesh,                    # DEM as trimesh
-    camera,                  # Source camera
-    distortion=None,         # Lens distortion model
-    include_misses=True      # Include failed projections
-)
-```
-
-**World → Pixel**:
-```python
-pixel_coords = world_to_pixel_coord(
-    coordinates,             # 3D world points
-    width, height,           # Target image dimensions
-    camera                   # Target camera
-)
+world = pixel_to_world_coord(x, y, width, height, mesh, camera, include_misses=True)
+xs, ys = world_to_pixel_coord(coordinates, width, height, camera)
 ```
 
 ---
 
-## Rendering Modes
+## Rendering modes
 
-### Orthographic Projection Mode
-
-In orthographic mode (`project_orthogonal=True`), each frame is independently projected onto the DEM and rendered from directly above:
+### Orthographic
 
 ```python
 settings = BaseSettings(
     orthogonal=True,
-    ortho_size=(ORTHO_WIDTH, ORTHO_HEIGHT),  # World units (meters)
-    camera_dist=CAMERA_DISTANCE,              # Height above terrain
-    resolution=Resolution(RENDER_WIDTH, RENDER_HEIGHT)
+    ortho_size=(70, 70),          # world units (metres)
+    camera_dist=10.0,             # height above terrain
+    resolution=Resolution(2048, 2048),
 )
 ```
 
-**Use Cases**:
-- Creating training datasets for object detection
-- Geographic mapping of animal positions
-- Consistent scale imagery for size estimation
+Used for detection training data, mapping animal positions, and consistent-scale imagery.
 
-### ALFS Integration Mode
-
-In ALFS mode (`project_orthogonal=False`), multiple frames are combined:
+### ALFS integration
 
 ```python
-# Collect neighboring frames
-prev_shots = get_shots_for_files(previous_frames, ...)
-add_shots = get_shots_for_files(additional_frames, ...)
-all_shots = prev_shots + [current_shot] + add_shots
-
-# Render integrated view
-renderer.render_integral(
-    shot_loader,
-    mask=mask,
-    save=True,
-    alpha_threshold=alpha_threshold
-)
+renderer.render_integral(shot_loader, mask=mask, alpha_threshold=2.0)
 ```
 
-**Key Parameters**:
-- `nr_of_frames_before_current`: Temporal window (past)
-- `nr_of_frames_after_current`: Temporal window (future)
-- `neighbor_fps`: Sampling rate within temporal window
-- `alpha_threshold`: Minimum overlap count for valid pixels
-- `merge_labels_in_alfs`: Aggregate labels from all contributing frames
+| Parameter | Meaning |
+|---|---|
+| `nr_of_frames_before_current` | temporal window, past |
+| `nr_of_frames_after_current` | temporal window, future |
+| `neighbor_fps` | sampling rate within the window |
+| `alpha_threshold` | minimum number of overlapping shots for a pixel to count |
+| `merge_labels_in_alfs` | aggregate labels from every contributing frame |
 
-**Use Cases**:
-- Noise reduction through multi-view integration
-- Novel viewpoint synthesis
-- Gap filling for occluded regions
-
-## Label Projection
-
-The framework includes tools for projecting 2D bounding box labels from source images to orthographic outputs:
-
-### Workflow
-
-1. **Read source labels** in YOLO format (class, x_center, y_center, width, height)
-2. **Convert to pixel coordinates** in source image space
-3. **Project to world coordinates** via ray-mesh intersection
-4. **Re-project to output image** using the virtual camera
-5. **Compute axis-aligned bounding boxes** in output space
-6. **Export in YOLO format** for training
-
-```python
-# Project label coordinates
-w_poses = pixel_to_world_coord(pixel_xs, pixel_ys, 
-                                input_resolution.width, input_resolution.height,
-                                tri_mesh, camera, include_misses=False)
-
-np_poses = world_to_pixel_coord(w_poses, 
-                                 render_resolution.width, render_resolution.height,
-                                 single_shot_camera)
-
-# Convert to axis-aligned bounding box
-axis_aligned_bb = get_axis_aligned_bounding_box(projected_coords)
-yolo_label = to_yolo_format(axis_aligned_bb, img_width, img_height)
-```
-
-### Label Merging in ALFS Mode
-
-When `merge_labels_in_alfs=True`, labels from all contributing frames are aggregated:
-- Labels are collected from each frame in the temporal window
-- Non-maximum suppression (NMS) can be applied to remove duplicates
-- The `NMS_IOU` parameter controls the overlap threshold
+Used for noise reduction through multi-view integration, novel viewpoint synthesis, and
+filling gaps behind occluders.
 
 ---
 
-## Correction System
+## Multi-channel and embedded light fields
 
-GPS and IMU measurements from drones sometimes contain systematic errors that must be corrected for accurate geo-referencing.
-
-### Correction Transform
-
-Each shot can have position and rotation corrections:
+The integral averages whatever the shots carry, and nothing about that requires colour. Give
+it dense DINOv3 descriptors and the result is a novel view whose pixels are 1280-dimensional
+feature vectors — useful for retrieval and similarity search over terrain rather than for
+looking at.
 
 ```python
-correction = Transform(
-    position=Vector3([tx, ty, tz]),      # Translation correction
-    rotation=Quaternion.from_eulers([rx, ry, rz])  # Rotation correction
-)
+from alfspy.embedding import DinoV3Extractor, FieldReducer
+from alfspy.render.field import FieldShot, render_field_integral
+from alfspy.io.field import open_field, save_field
+
+fields = DinoV3Extractor().extract_batch(frames)       # (h/16, w/16, 1280) per frame
+
+out = open_field('field.npy', (2048, 2048, 1280))      # memmap; ~21 GB
+result = render_field_integral(renderer, ctx, shots, out=out)
+save_field('field.npy', out, metadata)                 # + field_meta.json sidecar
+
+rgb = FieldReducer('pca').fit_transform(result.normalised(), mask=result.covered)
 ```
 
-### Frame-Based Corrections
+An OpenGL colour attachment holds four components, so a wider field is rendered in groups and
+reassembled; coverage is rendered once and reused across them, because geometry does not
+change between groups.
 
-Corrections can vary across a flight. The system supports:
+Fields upload at **their own resolution**, not the render resolution. Texture sampling is
+already bilinear, so a 128×128 patch grid uploads as 128×128 and the GPU performs the
+upsample — measured at a 256× reduction in per-slice upload traffic at 2048² output.
 
-1. **Default correction**: Applied to all frames
-2. **Interval corrections**: Different corrections for frame ranges
+`FieldReducer` separates fitting from transforming, so one basis can colour a whole sequence.
+Refitting per frame gives each frame its own basis and the sequence flickers. PCA, UMAP and
+t-SNE are available; t-SNE reports that it cannot be reused rather than silently refitting,
+since it has no out-of-sample transform.
+
+> The DINOv3 weights are gated on HuggingFace. Set `$HF_TOKEN`, or point `DinoV3Extractor` at
+> a local directory. Use `local_files_only=True` on machines with no outbound network.
+
+---
+
+## Ray casting
+
+Ray–mesh intersection is used to project labels onto the DEM, and is pluggable too:
+
+```python
+ProjectionScene(dem, poses, correction, raycaster='warp')    # or $ALFS_RAYCASTER
+```
+
+`embree` is the default. Measured on a 131k-triangle DEM, the crossover is around 10⁴ rays:
+
+| rays | embree | Warp CUDA |
+|---|---|---|
+| 80 (one frame's labels) | <1 ms | <1 ms |
+| 64k | 33 ms | 2 ms |
+| 4.2M (2048² dense) | 1.810 s | 0.085 s |
+
+Label projection casts tens of rays per frame, so the GPU backend cannot win there; it is for
+bulk work. **Install `AlfsPy[accel]`** — without embreex, trimesh falls back to a pure-Python
+intersector that is not merely ~85× slower but returns hits in a different index order.
+
+---
+
+## Label projection
+
+2D bounding boxes are carried from source frames into the rendered output:
+
+1. read source labels (YOLO or MOT format),
+2. convert to pixel coordinates in source-image space,
+3. project to world coordinates by ray–mesh intersection,
+4. re-project into the output image through the virtual camera,
+5. take the axis-aligned bounding box of the result,
+6. write YOLO labels.
+
+```python
+world = pixel_to_world_coord(pixel_xs, pixel_ys, in_w, in_h, mesh, camera,
+                             include_misses=False)
+xs, ys = world_to_pixel_coord(world, out_w, out_h, single_shot_camera)
+```
+
+In ALFS mode with `merge_labels_in_alfs=True`, labels from every contributing frame are
+collected and merged per track, with optional non-maximum suppression (`NMS_IOU`).
+
+---
+
+## Correction system
+
+GPS and IMU measurements contain systematic errors that must be corrected for accurate
+geo-referencing. Each shot can carry a position and rotation correction, either one default
+for the flight or per frame-range:
 
 ```json
 {
@@ -322,70 +374,62 @@ Corrections can vary across a flight. The system supports:
 }
 ```
 
+Drone poses are `[tilt, roll, heading]` in degrees, with tilt measured from nadir and heading
+clockwise from north. Use `quaternion_from_drone_pose`; composing them as
+`quaternion_from_eulers(..., 'zyx')` turns the heading into a spin about the camera's own
+optical axis, which is invisible at nadir and up to 128° wrong at the horizon.
+
 ---
 
 ## Usage
 
-### Docker Deployment
+### Docker
 
-Build the Docker image:
 ```bash
 docker build --tag orthorender -f Dockerfile .
-```
 
-Run with CPU:
-```bash
 docker run --rm \
-  -v /path/to/input:/input \
-  -v /path/to/output:/output \
-  --name orthorenderer \
-  -e INPUT_DIR="/input" \
-  -e OUTPUT_DIR="/output" \
+  -v /path/to/input:/input -v /path/to/output:/output \
+  -e INPUT_DIR=/input -e OUTPUT_DIR=/output \
   orthorender
 ```
 
-Run with GPU acceleration:
+The image sets `ALFS_ENGINE=torch` and ships the **CPU** torch build, because the CUDA wheel
+adds roughly 2 GB. For GPU rendering, drop the `--index-url .../whl/cpu` line from the
+`Dockerfile` and rebuild, or base the image on an `nvidia/cuda` runtime:
+
 ```bash
-docker run --rm \
-  -v /path/to/input:/input \
-  -v /path/to/output:/output \
-  --ipc=host --gpus '"device=0"' \
-  --name orthorenderer \
-  -e INPUT_DIR="/input" \
-  -e OUTPUT_DIR="/output" \
-  -e ALFS_DEVICE="cuda" \
+docker run --rm --ipc=host --gpus '"device=0"' \
+  -v /path/to/input:/input -v /path/to/output:/output \
+  -e INPUT_DIR=/input -e OUTPUT_DIR=/output -e ALFS_DEVICE=cuda \
   orthorender
 ```
 
-Note the image ships the **CPU** torch build by default, because the CUDA wheel adds roughly
-2 GB. For GPU rendering, drop the `--index-url .../whl/cpu` line from the `Dockerfile` and
-rebuild, or base the image on an `nvidia/cuda` runtime image.
+The image installs no `libx11`, `mesa` or `xvfb`, and the entry point starts no virtual
+display. The engine is set explicitly rather than left to a fallback, so a render in the
+container cannot silently change backend if a GL driver ever appears.
 
-The image no longer installs `libx11`, `libxrandr`, `libxinerama`, `libxi`, `mesa` or
-`xvfb`, and the entry point no longer starts a virtual display before sleeping two seconds
-and hoping. The renderer never opens a GL context, so the ModernGL/Xvfb artifacts described
-in the previous version's *Known Limitations* no longer apply.
-
-### Environment Variables
+### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `ALFS_ENGINE` | `moderngl` | Render backend: `moderngl`, `torch` or `vulkan` |
+| `ALFS_DEVICE` | - | Torch device, e.g. `cuda`. Torch backend only |
+| `ALFS_RAYCASTER` | `embree` | Ray caster: `embree` or `warp` |
+| `HF_TOKEN` | - | HuggingFace token for the gated DINOv3 weights |
 | `INPUT_DIR` | - | Path to input dataset folder |
 | `OUTPUT_DIR` | - | Path to output folder |
 | `SPLITS` | `train,val,test` | Comma-separated list of splits to process |
-| `CAMERA_DISTANCE` | `10.0` | Camera height above terrain (meters) |
-| `ORTHO_WIDTH` | `70` | Orthographic frustum width (meters) |
-| `ORTHO_HEIGHT` | `70` | Orthographic frustum height (meters) |
-| `INPUT_WIDTH` | `1024` | Input image width (pixels) |
-| `INPUT_HEIGHT` | `1024` | Input image height (pixels) |
-| `RENDER_WIDTH` | `2048` | Output image width (pixels) |
-| `RENDER_HEIGHT` | `2048` | Output image height (pixels) |
+| `CAMERA_DISTANCE` | `10.0` | Camera height above terrain (metres) |
+| `ORTHO_WIDTH` / `ORTHO_HEIGHT` | `70` | Orthographic frustum size (metres) |
+| `INPUT_WIDTH` / `INPUT_HEIGHT` | `1024` | Input image size (pixels) |
+| `RENDER_WIDTH` / `RENDER_HEIGHT` | `2048` | Output image size (pixels) |
 | `INITIAL_SKIP` | `0` | Frames to skip at start |
-| `ADD_BACKGROUND` | `1` | Overlay result on DEM render |
-| `FOVY` | `50.0` | Field of view for perspective camera |
+| `ADD_BACKGROUND` | `1` | Overlay result on the DEM render |
+| `FOVY` | `50.0` | Field of view for the perspective camera |
 | `ASPECT_RATIO` | `1.0` | Camera aspect ratio |
-| `SAVE_LABELED_IMAGES` | `0` | Save images with drawn labels |
-| `PROJECT_ORTHOGONAL` | `1` | Use orthographic (1) or ALFS (0) mode |
+| `SAVE_LABELED_IMAGES` | `0` | Save images with labels drawn on |
+| `PROJECT_ORTHOGONAL` | `1` | Orthographic (1) or ALFS (0) mode |
 | `ADDITIONAL_ROTATIONS` | `0` | Extra rotated views per frame |
 | `ROTATION_LIMIT` | `2π` | Max rotation angle for augmentation |
 | `ROTATION_SEED` | `-1` | Random seed (-1 for random) |
@@ -394,7 +438,7 @@ in the previous version's *Known Limitations* no longer apply.
 | `NMS_IOU` | `0.9` | NMS IoU threshold |
 | `IS_THERMAL` | `1` | Process thermal (1) or RGB (0) data |
 
-### Input Data Structure
+### Input data structure
 
 ```
 dataset/
@@ -404,18 +448,13 @@ dataset/
 │   │   └── ...
 │   ├── val/
 │   └── test/
-├── labels/
-│   ├── train/
-│   │   ├── {flight_id}_{frame_id}.txt  (YOLO format)
-│   │   └── ...
-│   ├── val/
-│   └── test/
+├── labels/                                 # YOLO format, mirroring images/
 ├── correction_data/
-│   ├── {flight_id}_dem.glb            # Digital Elevation Model
-│   ├── {flight_id}_matched_poses.json # Camera poses
-│   ├── {flight_id}_correction.json    # GPS/IMU corrections
-│   ├── {flight_id}_mask_t.png         # Thermal mask
-│   └── {flight_id}_mask_r.png         # RGB mask
+│   ├── {flight_id}_dem.glb                 # Digital Elevation Model
+│   ├── {flight_id}_matched_poses.json      # Camera poses
+│   ├── {flight_id}_correction.json         # GPS/IMU corrections
+│   ├── {flight_id}_mask_t.png              # Thermal mask
+│   └── {flight_id}_mask_r.png              # RGB mask
 ├── export_train.json
 ├── export_val.json
 └── export_test.json
@@ -423,36 +462,63 @@ dataset/
 
 ---
 
-## Known Limitations
+## Migrating from 2.x
 
-1. **~~Virtual Frame Buffer Artifacts~~ — resolved.** The ModernGL/Xvfb transparency
-   artifacts are gone: there is no GL context, no driver-owned surface and no shared
-   framebuffer binding. Accumulators are tensors allocated per render call.
+The public API is unchanged — `Renderer`, `CtxShot`, `ProjectionScene` and the pipeline
+scripts keep their signatures, and existing call sites need no edits. What changed:
 
-   The port also found a **second, host-side cause** of the same symptom that was present on
-   every platform: `render_integral` called `np.divide(..., where=mask)` without `out=`, so
-   every pixel below the alpha threshold held uninitialised heap memory rather than zeros.
-   That is fixed here, and the one-line fix is worth backporting to `alfs_py`. See
-   [`docs/MIGRATION_REVIEW.md` §3.1](docs/MIGRATION_REVIEW.md).
+| Change | What to do |
+|---|---|
+| No render backend is a base dependency | `pip install "AlfsPy[moderngl]"` to keep 2.x behaviour |
+| Default engine is ModernGL | Nothing, unless you want another: `engine=` or `$ALFS_ENGINE` |
+| `trimesh` floor raised to >= 4.0 | Nothing. trimesh 3.x silently used a pure-Python ray intersector that returned hits in a **different index order** — a correctness bug, not just a slow path |
+| `RenderObject` no longer exported from `alfspy.core.rendering` | Import it from the backend package. It is a mesh resident on a device, so it is backend-specific |
+| Alpha in a returned integral image now means opacity | Read the overlap count from `IntegralResult.coverage` via `render_integral_raw` |
+| Vulkan backend needs Python >= 3.11 | Nothing, unless you use it. Everything else runs on 3.9+ |
+| `make_mgl_context` / `make_torch_context` deprecated | Use `make_context('moderngl')` / `make_context('torch')`. The old names warn and delegate |
 
-2. **CPU throughput.** A pure-torch rasteriser is slower than a GPU driver. A 30-shot ALFS
-   integral at 2048×2048 over a 131 k-triangle DEM takes about 7 s per output frame on CPU.
-   Use `device="cuda"` for production volumes; benchmark with
-   `python -m test.bench.bench_raster`.
-
-3. **DEM Resolution**: Accuracy of geo-referencing depends on DEM resolution. High-resolution DEMs are recommended for best results.
-
-4. **Correction Determination**: Manual correction factors must be determined per-flight through visual inspection of static object alignment.
-
-5. **~~Latent defects in the coordinate-conversion helpers~~ — resolved.** A batch of
-   long-standing bugs in `convert.py` and the label camera has been fixed in **both** this
-   project and `alfs_py`: the transposed ray rotation and its Euler-negating compensator, the
-   `world_to_pixel_coord` broadcast that only accepted 1 or 4 points, the never-working
-   orthographic ray branch, and the non-invertible `change_pixel_origin`. See
-   [`docs/MIGRATION_REVIEW.md` §9](docs/MIGRATION_REVIEW.md).
+Coming from **AlfsTorch** (`bambi-eco/alfs_pytorch`), which this release absorbs: the import
+name was already `alfspy`, so swap the distribution for `AlfsPy[torch]` and set
+`ALFS_ENGINE=torch`. `make_mgl_context` returns an OpenGL context again rather than a
+`TorchContext`; use `make_context('torch')`.
 
 ---
 
+## Known limitations
+
+1. **DEM resolution.** Geo-referencing accuracy depends on it. High-resolution DEMs are
+   recommended.
+
+2. **Correction determination.** Correction factors are still established per flight by
+   visually inspecting the alignment of static objects.
+
+3. **CPU throughput of the torch backend.** A pure-tensor rasteriser is slower than a GPU
+   driver: a 30-shot integral at 2048² over a 131k-triangle DEM takes roughly 7 s per output
+   frame on CPU. Use `device='cuda'`, or the `moderngl`/`vulkan` backends. Benchmark with
+   `python -m test.bench.bench_raster`.
+
+4. **~~Virtual framebuffer artifacts~~ — resolved.** The ModernGL/Xvfb transparency artifacts
+   are avoidable by choosing a backend that opens no GL context. A second, host-side cause of
+   the same symptom was also fixed: `render_integral` divided with `np.divide(..., where=...)`
+   and no `out=`, so pixels below the threshold held uninitialised heap memory rather than
+   zeros — which is why the artifacts appeared "sometimes".
+
+5. **~~Latent coordinate-conversion defects~~ — resolved.** The transposed ray rotation and
+   its Euler-negating compensator, the `world_to_pixel_coord` broadcast that only accepted 1
+   or 4 points, the never-working orthographic ray branch, and the non-invertible
+   `change_pixel_origin`. See [`docs/MIGRATION_REVIEW.md`](docs/MIGRATION_REVIEW.md).
+
+---
+
+## Documentation
+
+- [`docs/MIGRATION_REVIEW.md`](docs/MIGRATION_REVIEW.md) — the PyTorch port's design review
+  and defect inventory
+- [`docs/pyrr_conventions.md`](docs/pyrr_conventions.md) — matrix and vector conventions
+- [`test/README.md`](test/README.md) — the test suite
+
 ## Acknowledgments
 
-This project is funded by the Austrian Research Promotion Agency FFG (project THUMPER; program number: 917796) and was developed as part of the BAMBI research project (program number: 892231).
+This project is funded by the Austrian Research Promotion Agency FFG (project THUMPER;
+program number: 917796) and was developed as part of the BAMBI research project (program
+number: 892231).

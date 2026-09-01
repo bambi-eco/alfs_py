@@ -6,10 +6,16 @@ chosen.
 
 A backend module must expose:
 
-``create_context(**kwargs)``   build a render context in the pipeline's standard state
-``is_available()``             whether a context can actually be created here
-``owns_context(ctx)``          whether a given context belongs to this backend
+``create_context(device=None, **options)``  build a render context in the standard state
+``reset_state(ctx)``                        return a context to that standard state
+``is_available()``                          whether a context can be created here
+``owns_context(ctx)``                       whether a context belongs to this backend
 ``Renderer``/``CtxShot``/``RenderObject``/``img_from_fbo``
+
+That signature is deliberately identical across backends -- ``device`` first, then
+``**options`` -- so :func:`make_context` behaves the same whichever engine is chosen and only
+the engine argument changes the result. Backends honour the options that apply to them and
+ignore the rest.
 
 Backends are imported lazily and cached, so an uninstalled optional dependency only fails
 when that backend is actually requested -- importing ``alfspy`` never pulls in torch or
@@ -29,6 +35,7 @@ __all__ = [
     'available_engines',
     'resolve_engine',
     'create_context',
+    'make_context',
     'backend_for_context',
 ]
 
@@ -127,18 +134,35 @@ def resolve_engine(engine: Optional[str] = None) -> str:
     return os.environ.get(ENGINE_ENV_VAR) or DEFAULT_ENGINE
 
 
-def create_context(engine: Optional[str] = None, **kwargs):
+def make_context(engine: Optional[str] = None, device: Optional[str] = None, **options):
     """
     Creates a render context for the selected backend.
 
+    Every backend implements this same signature, so **only ``engine`` changes what you get**:
+    the same call works unchanged across ModernGL, torch and Vulkan. Backends honour what
+    applies to them and ignore the rest rather than raising, which is what lets a caller
+    switch engines without also rewriting its arguments.
+
+        make_context()                              # $ALFS_ENGINE, or the default
+        make_context('torch', device='cuda')
+        make_context('vulkan', device='cpu')        # software adapter
+        make_context('moderngl', backend='egl')     # headless Linux GL
+
     :param engine: The backend to use (optional). Defaults to ``$ALFS_ENGINE`` and then to
         :data:`DEFAULT_ENGINE`.
-    :param kwargs: Forwarded to the backend's ``create_context``. Backends accept different
-        options -- ``backend=`` for ModernGL, ``device=``/``dtype=`` for torch.
+    :param device: Which device to render on -- ``"cpu"``, ``"cuda"``, ``"cuda:1"``
+        (optional). Torch uses it directly; Vulkan maps ``"cpu"`` onto the software fallback
+        adapter; ModernGL ignores it, because OpenGL offers no device selection.
+    :param options: Backend-specific extras, documented on each backend's ``create_context``.
+        Unknown keys are ignored so that options meant for one engine do not break another.
     :return: A backend-specific render context.
     """
     name = resolve_engine(engine)
-    return get_backend(name).create_context(**kwargs)
+    return get_backend(name).create_context(device=device, **options)
+
+
+#: Alias of :func:`make_context`, kept because 3.0.0 shipped with this name.
+create_context = make_context
 
 
 def backend_for_context(ctx) -> ModuleType:
@@ -166,5 +190,5 @@ def backend_for_context(ctx) -> ModuleType:
     raise TypeError(
         f'No registered render backend recognises a context of type '
         f'{type(ctx).__module__}.{type(ctx).__name__}. '
-        f'Create one with alfspy.core.backends.create_context(engine=...); '
+        f'Create one with alfspy.core.backends.make_context(engine); '
         f'available here: {", ".join(available_engines()) or "none"}.')

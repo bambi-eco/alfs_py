@@ -13,16 +13,25 @@ import moderngl as mgl
 __all__ = ['create_context', 'is_available']
 
 
-def create_context(backend: Optional[str] = None, standalone: bool = True) -> mgl.Context:
+def create_context(device: Optional[str] = None, **options) -> mgl.Context:
     """
     Creates a ModernGL context in the pipeline's standard state.
 
-    :param backend: An explicit ModernGL backend, e.g. ``"egl"`` for headless Linux
-        (optional). Leave as ``None`` for the platform default.
-    :param standalone: Whether to create a standalone (windowless) context. Defaults to
-        ``True``; there is no on-screen surface in this pipeline.
+    Every backend takes this same signature, so ``create_context(engine=...)`` behaves
+    identically whichever engine is chosen and only the engine changes the result.
+
+    :param device: Accepted for interface compatibility and ignored. OpenGL offers no device
+        selection -- the driver picks the adapter -- so unlike the torch and Vulkan backends
+        there is nothing to honour here.
+    :param options: Backend-specific extras. This one understands ``backend`` (an explicit
+        ModernGL backend such as ``"egl"`` for headless Linux) and ``standalone`` (whether to
+        create a windowless context, default ``True``). Anything else is ignored, so options
+        meant for another engine do not raise.
     :return: A configured ModernGL context.
     """
+    backend = options.get('backend')
+    standalone = options.get('standalone', True)
+
     if backend is not None:
         ctx = mgl.create_standalone_context(backend=backend)
     else:

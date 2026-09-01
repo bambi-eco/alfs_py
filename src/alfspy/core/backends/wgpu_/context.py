@@ -136,15 +136,28 @@ class WgpuContext:
                 f'features={sorted(self.features) or "none"}>')
 
 
-def create_context(power_preference: str = 'high-performance',
-                   force_fallback_adapter: bool = False) -> WgpuContext:
+def create_context(device: Optional[str] = None, **options) -> 'WgpuContext':
     """
     Creates a WebGPU context in the pipeline's standard state.
 
-    :param power_preference: ``"high-performance"`` or ``"low-power"``.
-    :param force_fallback_adapter: Whether to force the software adapter.
+    Every backend takes this same signature, so ``create_context(engine=...)`` behaves
+    identically whichever engine is chosen and only the engine changes the result.
+
+    :param device: ``"cpu"`` selects the software fallback adapter; anything else, including
+        ``None``, asks for the highest-performance adapter. A specific index such as
+        ``"cuda:1"`` is not honoured -- WebGPU exposes adapters, not CUDA devices -- but is
+        accepted so the same call works across engines.
+    :param options: Backend-specific extras. This one understands ``power_preference``
+        (``"high-performance"`` or ``"low-power"``) and ``force_fallback_adapter``. Anything
+        else is ignored, so options meant for another engine do not raise.
     :return: A configured context.
     """
+    wants_cpu = isinstance(device, str) and device.lower().startswith('cpu')
+
+    power_preference = options.get(
+        'power_preference', 'low-power' if wants_cpu else 'high-performance')
+    force_fallback_adapter = options.get('force_fallback_adapter', wants_cpu)
+
     ctx = WgpuContext(power_preference=power_preference,
                       force_fallback_adapter=force_fallback_adapter)
     ctx.enable(DEPTH_TEST)

@@ -55,8 +55,7 @@ import numpy as np
 from pyrr import Matrix44, Quaternion, Vector3
 from trimesh import Trimesh
 
-from alfspy.core.backends import create_context as backend_create_context
-from alfspy.core.backends import resolve_engine
+from alfspy.core.backends import make_context
 
 from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo.transform import Transform
@@ -236,7 +235,7 @@ class ProjectionScene:
             ``"embree"`` or ``"warp"`` (optional). Defaults to ``$ALFS_RAYCASTER`` and then to
             ``embree``, which is the right choice for the tens of rays a frame's labels need.
         :param gl_backend: An explicit ModernGL backend, e.g. ``"egl"`` for headless Linux
-            (optional). Used only when creating a ModernGL context.
+            (optional). Ignored by backends that have no such notion.
         """
         self.settings = settings or ProjectionSettings()
 
@@ -250,15 +249,10 @@ class ProjectionScene:
 
         # ── Render context ───────────────────────────────────────────────────
         if ctx is None:
-            # Only forward the options the chosen backend understands: `device` is torch's,
-            # `backend` is ModernGL's, and passing either to the other is an error.
-            name = resolve_engine(engine)
-            kwargs = {}
-            if name == 'torch' and device is not None:
-                kwargs['device'] = device
-            elif name == 'moderngl' and gl_backend is not None:
-                kwargs['backend'] = gl_backend
-            self.ctx = backend_create_context(engine=name, **kwargs)
+            # Every backend takes the same signature and ignores what does not apply to it,
+            # so there is nothing to special-case: the engine is the only thing that differs.
+            options = {'backend': gl_backend} if gl_backend is not None else {}
+            self.ctx = make_context(engine, device=device, **options)
             self._owns_ctx = True
         else:
             self.ctx = ctx
