@@ -44,6 +44,14 @@ DEFAULT_ENGINE = 'moderngl'
 _MODULES: Dict[str, str] = {
     'moderngl': 'alfspy.core.backends.moderngl_',
     'torch': 'alfspy.core.backends.torch_',
+    'vulkan': 'alfspy.core.backends.wgpu_',
+}
+
+# The extra that provides each backend, for the error message when one is missing.
+_EXTRAS: Dict[str, str] = {
+    'moderngl': 'moderngl',
+    'torch': 'torch',
+    'vulkan': 'vulkan',
 }
 
 _CACHE: Dict[str, ModuleType] = {}
@@ -78,7 +86,7 @@ def get_backend(name: str) -> ModuleType:
     except ImportError as exc:
         raise ImportError(
             f'The {name!r} render backend is registered but its dependency is not installed. '
-            f'Install it with `pip install "AlfsPy[{name}]"`. Original error: {exc}'
+            f'Install it with `pip install "AlfsPy[{_EXTRAS[name]}]"`. Original error: {exc}'
         ) from exc
 
     _CACHE[name] = module

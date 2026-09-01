@@ -53,6 +53,12 @@ moderngl = [
 torch = [
     "torch>=1.13",
 ]
+# The Vulkan backend, via WebGPU. This is the only part of the project that needs Python
+# 3.11; everything else runs on 3.9+, which is why it is an extra rather than a base
+# dependency. Its value is headless rendering: no GL driver and no Xvfb.
+vulkan = [
+    "wgpu>=0.32; python_version >= '3.11'",
+]
 
 # Accelerated ray/mesh intersection for label projection. Without these, trimesh silently
 # falls back to its pure-Python intersector, which is not merely slow -- it returns hits in a
