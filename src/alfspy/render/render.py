@@ -11,6 +11,8 @@ from PIL import Image
 from numpy.typing import NDArray
 from pyrr import Quaternion, Vector3
 
+from alfspy.core.backends import create_context as backend_create_context
+from alfspy.core.backends import resolve_engine
 from alfspy.core.torchgl import TorchContext, create_context
 from alfspy.core.geo.aabb import AABB
 from alfspy.core.geo.transform import Transform
@@ -163,18 +165,20 @@ def make_torch_context(device: Optional[str] = None, **kwargs) -> TorchContext:
     return create_context(device=device, **kwargs)
 
 
-def make_mgl_context(standalone: bool = True, **kwargs) -> TorchContext:
+def make_mgl_context(standalone: bool = True, **kwargs):
     """
-    Deprecated alias of ``make_torch_context``.
+    Creates a ModernGL context.
 
-    Retained so that scripts written against the ModernGL version keep running after only
-    swapping the import. The ``standalone`` flag has no meaning without a GL driver and is
-    ignored.
-    :param standalone: Ignored; accepted for signature compatibility.
-    :param kwargs: Forwarded to ``make_torch_context``.
-    :return: A ``TorchContext`` instance.
+    Between the PyTorch port and the backend merge this was an alias that silently returned a
+    ``TorchContext``, which made it a trap: code asking for GL got a tensor rasteriser. Now
+    that both backends exist it does what its name says. Prefer
+    ``alfspy.core.backends.create_context(engine=...)`` for new code.
+
+    :param standalone: Whether to create a standalone (windowless) context.
+    :param kwargs: Forwarded to the ModernGL backend's ``create_context``.
+    :return: A ModernGL context.
     """
-    return make_torch_context(**kwargs)
+    return backend_create_context(engine='moderngl', standalone=standalone, **kwargs)
 
 
 def read_shots(json_file: str, ctx: TorchContext, se: BaseSettings) -> list[CtxShot]:
@@ -267,13 +271,14 @@ def _ensure_or_copy_settings(se: Optional[S], cls: Type[S]) -> S:
 
 
 def _base_steps(gltf_file: str, shot_json_file: str, mask_file: Optional[str],
-                se: BaseSettings) -> tuple[TorchContext, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
+                se: BaseSettings, engine: Optional[str] = None
+                ) -> tuple[object, Camera, Renderer, list[CtxShot], Optional[TextureData]]:
     with LoggerStep(logger, f'Reading GLTF file from "{gltf_file}"'):
         mesh_data, texture_data = read_gltf(gltf_file)
         mesh_data, texture_data = process_render_data(mesh_data, texture_data)
 
-    with LoggerStep(logger, 'Creating render context'):
-        ctx = make_torch_context()
+    with LoggerStep(logger, f'Creating render context (engine: {resolve_engine(engine)})'):
+        ctx = backend_create_context(engine=engine)
 
     with LoggerStep(logger,f'Extracting shots from "{shot_json_file}" (Creating lazy shots: {se.lazy})'):
         shots = read_shots(shot_json_file, ctx, se)
@@ -339,7 +344,8 @@ def _frame_processing(frame_files: Sequence[str], se: BaseAnimationSettings) -> 
 # endregion
 
 def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
-                  settings: Optional[IntegralSettings] = None) -> None:
+                  settings: Optional[IntegralSettings] = None,
+                  engine: Optional[str] = None) -> None:
     with LoggerStep(logger, 'Start Project Shots', 'All done'):
 
         # region Initializing
@@ -349,7 +355,7 @@ def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
         # endregion
 
-        ctx, _, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
+        ctx, _, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se, engine)
 
         # region Projecting Shots
 
@@ -367,7 +373,8 @@ def project_shots(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
 
 def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
-                    settings: Optional[IntegralSettings] = None) -> Camera:
+                    settings: Optional[IntegralSettings] = None,
+                    engine: Optional[str] = None) -> Camera:
     with LoggerStep(logger, 'Start Render Integral', 'All done'):
 
         # region Initializing
@@ -377,7 +384,7 @@ def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
         # endregion
 
-        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
+        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se, engine)
 
         # region Rendering Integral
 
@@ -396,7 +403,8 @@ def render_integral(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
 
 def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
-                  settings: Optional[FocusAnimationSettings] = None) -> None:
+                  settings: Optional[FocusAnimationSettings] = None,
+                  engine: Optional[str] = None) -> None:
     with LoggerStep(logger, 'Start Animate Focus', 'All done'):
 
         # region Initializing
@@ -411,7 +419,7 @@ def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
         # endregion
 
-        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
+        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se, engine)
 
         # region Frame Rendering
 
@@ -478,7 +486,8 @@ def animate_focus(gltf_file: str, shot_json_file: str, mask_file: Optional[str] 
 
 
 def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str] = None,
-                    settings: Optional[ShutterAnimationSettings] = None) -> None:
+                    settings: Optional[ShutterAnimationSettings] = None,
+                    engine: Optional[str] = None) -> None:
     with LoggerStep(logger, 'Start Animate Shutter', 'All done'):
 
         # region Initializing
@@ -487,7 +496,7 @@ def animate_shutter(gltf_file: str, shot_json_file: str, mask_file: Optional[str
 
         # endregion
 
-        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se)
+        ctx, camera, renderer, shots, mask = _base_steps(gltf_file, shot_json_file, mask_file, se, engine)
 
         # region Render Background
 

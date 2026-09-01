@@ -55,7 +55,8 @@ import numpy as np
 from pyrr import Matrix44, Quaternion, Vector3
 from trimesh import Trimesh
 
-from alfspy.core.torchgl import TorchContext
+from alfspy.core.backends import create_context as backend_create_context
+from alfspy.core.backends import resolve_engine
 
 from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo.transform import Transform
@@ -73,7 +74,6 @@ from alfspy.render.data import BaseSettings, CameraPositioningMode
 from alfspy.render.render import (
     make_camera,
     make_shot_loader,
-    make_torch_context,
     process_render_data,
     read_gltf,
     release_all,
@@ -211,7 +211,8 @@ class ProjectionScene:
         correction_file: str,
         mask_file: Optional[str] = None,
         settings: Optional[ProjectionSettings] = None,
-        ctx: Optional[TorchContext] = None,
+        ctx=None,
+        engine: Optional[str] = None,
         device: Optional[str] = None,
         gl_backend: Optional[str] = None,
     ):
@@ -221,13 +222,16 @@ class ProjectionScene:
         :param correction_file: Path to the flight correction JSON (``..._correction.json``).
         :param mask_file: Optional path to a projection mask image.
         :param settings: Render settings. Defaults to :class:`ProjectionSettings` defaults.
-        :param ctx: An existing :class:`~alfspy.core.torchgl.context.TorchContext` to render
-            in. If ``None`` one is created (and released by :meth:`release`).
+        :param ctx: An existing render context to render in. If ``None`` one is created (and
+            released by :meth:`release`). Passing a context selects the backend that owns it,
+            so ``engine`` is ignored when this is given.
+        :param engine: Which render backend to use -- ``"moderngl"`` or ``"torch"``
+            (optional). Defaults to ``$ALFS_ENGINE`` and then to
+            :data:`~alfspy.core.backends.registry.DEFAULT_ENGINE`.
         :param device: The torch device to render on, e.g. ``"cpu"`` or ``"cuda"`` (optional).
-            Used only when ``ctx`` is ``None``; defaults to CUDA when available.
-        :param gl_backend: Deprecated and ignored. The torch backend needs no GL driver, so
-            there is no headless backend to select -- this is the parameter the Xvfb-based
-            deployment used to need.
+            Used only when creating a torch context.
+        :param gl_backend: An explicit ModernGL backend, e.g. ``"egl"`` for headless Linux
+            (optional). Used only when creating a ModernGL context.
         """
         self.settings = settings or ProjectionSettings()
 
@@ -241,7 +245,15 @@ class ProjectionScene:
 
         # ── Render context ───────────────────────────────────────────────────
         if ctx is None:
-            self.ctx = make_torch_context(device=device)
+            # Only forward the options the chosen backend understands: `device` is torch's,
+            # `backend` is ModernGL's, and passing either to the other is an error.
+            name = resolve_engine(engine)
+            kwargs = {}
+            if name == 'torch' and device is not None:
+                kwargs['device'] = device
+            elif name == 'moderngl' and gl_backend is not None:
+                kwargs['backend'] = gl_backend
+            self.ctx = backend_create_context(engine=name, **kwargs)
             self._owns_ctx = True
         else:
             self.ctx = ctx

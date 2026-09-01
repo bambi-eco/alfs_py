@@ -32,6 +32,33 @@ def bytes_to_img(data: Union[bytes, str]) -> NDArray[np.number]:
     return img
 
 
+def to_rgba_f4(img: NDArray) -> NDArray:
+    """
+    Converts an image to the format the renderers consume: RGBA with an ``f4`` dtype.
+
+    Grayscale (thermal) and BGR input are widened to four channels; BGR ordering is swapped to
+    RGB. This was duplicated verbatim as ``CtxShot._cvt_img`` in each backend even though it
+    touches nothing device-specific, so both now delegate here.
+
+    Note this is *the* place the pipeline is pinned to four channels -- an N-channel light
+    field has to widen this, not work around it.
+
+    :param img: The image to convert, as read by ``cv2.imread(..., IMREAD_UNCHANGED)``.
+    :return: The converted image as an ``(H, W, 4)`` float32 array.
+    """
+    channel_count = 1 if len(img.shape) == 2 else img.shape[2]
+
+    # convert to and guarantee RGBA
+    if channel_count == 1:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGBA)
+    elif channel_count == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+
+    return img.astype('f4')
+
+
 def split_components(arr: NDArray) -> tuple[NDArray, ...]:
     """
     Slices a numpy array into arrays of its highest order axis.

@@ -34,6 +34,22 @@ def create_context(backend: Optional[str] = None, standalone: bool = True) -> mg
     return ctx
 
 
+def reset_state(ctx: mgl.Context) -> None:
+    """
+    Returns a context to the pipeline's standard state.
+
+    ``Renderer.render_integral`` switches to additive blending and disables depth testing, and
+    only re-disables blending afterwards -- so a context that has integrated once is left with
+    depth testing off. Anything reusing a context across renders should reset it first.
+
+    :param ctx: The context to reset.
+    """
+    ctx.enable(cast(int, mgl.DEPTH_TEST))
+    ctx.enable(cast(int, mgl.CULL_FACE))
+    ctx.cull_face = 'back'
+    ctx.disable(cast(int, mgl.BLEND))
+
+
 def is_available() -> bool:
     """
     :return: Whether a ModernGL context can actually be created here. Importing ``moderngl``

@@ -49,6 +49,12 @@ ENV NMS_IOU=0.9
 ENV IS_THERMAL=1
 ENV USE_ONEFILE_CORRECTIONS=1
 
+# Selects the render backend. The library default is `moderngl`, which needs a GL driver and
+# a display -- this image deliberately has neither, which is the whole point of the torch
+# rasteriser. Set explicitly rather than relying on a fallback, so a render in this container
+# is reproducible and does not silently change engine if a GL driver ever appears.
+ENV ALFS_ENGINE=torch
+
 # Selects the torch device. Leave unset to use CUDA when visible, otherwise CPU.
 ENV ALFS_DEVICE=""
 

@@ -18,7 +18,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pyrr import Quaternion, Vector3
 
-from alfspy.core.backends.moderngl_ import CtxShot, Renderer
+from alfspy.core.backends import backend_for_context
+from alfspy.core.rendering import CtxShot, Renderer
 from alfspy.core.rendering.data import RenderResultMode, Resolution, TextureData
 from test.helpers.scenes import (
     checkerboard_rgba,
@@ -80,17 +81,12 @@ def _make_shot(ctx, dx: float, dy: float) -> CtxShot:
 
 def reset_state(ctx) -> None:
     """
-    Puts the context into the pipeline's standard state.
+    Puts the context into the pipeline's standard state, whichever backend owns it.
 
-    ``Renderer.render_integral`` disables ``DEPTH_TEST`` on the shared context and never
-    re-enables it, so without this a case would depend on which cases ran before it.
+    ``Renderer.render_integral`` disables depth testing and never re-enables it, so without
+    this a case would depend on which cases ran before it.
     """
-    import moderngl as mgl
-
-    ctx.enable(mgl.DEPTH_TEST)
-    ctx.enable(mgl.CULL_FACE)
-    ctx.cull_face = 'back'
-    ctx.disable(mgl.BLEND)
+    backend_for_context(ctx).reset_state(ctx)
 
 
 def _case_background(ctx) -> NDArray:
