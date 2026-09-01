@@ -19,11 +19,24 @@ import pytest
 from alfspy.embedding.reduce import FieldReducer, reduce_to_2d, reduce_to_rgb
 
 try:
+    import sklearn  # noqa: F401
+
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
+try:
     import umap  # noqa: F401
 
     HAS_UMAP = True
 except ImportError:
     HAS_UMAP = False
+
+# The reducers are an optional extra, so an environment without them must skip these rather
+# than fail them.
+pytestmark = pytest.mark.skipif(
+    not HAS_SKLEARN,
+    reason='scikit-learn is not installed; `pip install "AlfsPy[embedding]"`')
 
 
 @pytest.fixture
