@@ -29,10 +29,12 @@ from typing import Dict, List, Optional
 
 __all__ = [
     'DEFAULT_ENGINE',
+    'DEVICE_ENV_VAR',
     'ENGINE_ENV_VAR',
     'engine_names',
     'get_backend',
     'available_engines',
+    'resolve_device',
     'resolve_engine',
     'create_context',
     'make_context',
@@ -40,6 +42,11 @@ __all__ = [
 ]
 
 ENGINE_ENV_VAR = 'ALFS_ENGINE'
+
+# The device counterpart of ALFS_ENGINE. A deployment that selects an engine through the
+# environment has to be able to select the device the same way -- otherwise ALFS_ENGINE=torch
+# is only half an answer, and every caller has to plumb `device=` through itself to finish it.
+DEVICE_ENV_VAR = 'ALFS_DEVICE'
 
 # ModernGL is the default because it is what this project rendered with historically, so an
 # unqualified call keeps producing what it produced before. It is a deliberate, explicit
@@ -134,6 +141,22 @@ def resolve_engine(engine: Optional[str] = None) -> str:
     return os.environ.get(ENGINE_ENV_VAR) or DEFAULT_ENGINE
 
 
+def resolve_device(device: Optional[str] = None) -> Optional[str]:
+    """
+    Determines which device to render on.
+
+    Precedence matches :func:`resolve_engine`: an explicit argument, then ``$ALFS_DEVICE``,
+    then ``None`` -- which leaves the choice to the backend, since each has its own sensible
+    answer (torch picks CUDA when it is there, ModernGL has no device to pick).
+
+    :param device: An explicit device name (optional).
+    :return: The resolved device, or ``None`` to let the backend decide.
+    """
+    if device is not None:
+        return device
+    return os.environ.get(DEVICE_ENV_VAR) or None
+
+
 def make_context(engine: Optional[str] = None, device: Optional[str] = None, **options):
     """
     Creates a render context for the selected backend.
@@ -143,7 +166,7 @@ def make_context(engine: Optional[str] = None, device: Optional[str] = None, **o
     applies to them and ignore the rest rather than raising, which is what lets a caller
     switch engines without also rewriting its arguments.
 
-        make_context()                              # $ALFS_ENGINE, or the default
+        make_context()                              # $ALFS_ENGINE / $ALFS_DEVICE, or defaults
         make_context('torch', device='cuda')
         make_context('vulkan', device='cpu')        # software adapter
         make_context('moderngl', backend='egl')     # headless Linux GL
@@ -151,14 +174,15 @@ def make_context(engine: Optional[str] = None, device: Optional[str] = None, **o
     :param engine: The backend to use (optional). Defaults to ``$ALFS_ENGINE`` and then to
         :data:`DEFAULT_ENGINE`.
     :param device: Which device to render on -- ``"cpu"``, ``"cuda"``, ``"cuda:1"``
-        (optional). Torch uses it directly; Vulkan maps ``"cpu"`` onto the software fallback
-        adapter; ModernGL ignores it, because OpenGL offers no device selection.
+        (optional). Defaults to ``$ALFS_DEVICE``, then to the backend's own choice. Torch uses
+        it directly; Vulkan maps ``"cpu"`` onto the software fallback adapter; ModernGL
+        ignores it, because OpenGL offers no device selection.
     :param options: Backend-specific extras, documented on each backend's ``create_context``.
         Unknown keys are ignored so that options meant for one engine do not break another.
     :return: A backend-specific render context.
     """
     name = resolve_engine(engine)
-    return get_backend(name).create_context(device=device, **options)
+    return get_backend(name).create_context(device=resolve_device(device), **options)
 
 
 #: Alias of :func:`make_context`, kept because 3.0.0 shipped with this name.

@@ -177,6 +177,19 @@ delegate to `make_context`.
 `available_engines()` probes rather than guesses: `moderngl` imports successfully on a machine
 with no usable GL driver and only fails when a context is created.
 
+The engine and the device follow the same precedence — an explicit argument, then the
+environment variable, then a default. So a deployment can select both without touching any
+call site:
+
+```bash
+export ALFS_ENGINE=torch
+export ALFS_DEVICE=cuda:1
+```
+
+`resolve_engine()` and `resolve_device()` report what a bare `make_context()` would pick.
+The device default is `None` rather than a name, which leaves the choice to the backend: torch
+finds CUDA on its own, and ModernGL has no device to choose.
+
 ### How closely they agree
 
 Verified against golden fixtures captured from the OpenGL renderer:
@@ -462,7 +475,7 @@ container cannot silently change backend if a GL driver ever appears.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ALFS_ENGINE` | `moderngl` | Render backend: `moderngl`, `torch` or `vulkan` |
-| `ALFS_DEVICE` | - | Torch device, e.g. `cuda`. Torch backend only |
+| `ALFS_DEVICE` | - | Device to render on, e.g. `cuda`, `cuda:1`, `cpu`. Used by torch; Vulkan maps `cpu` onto its software adapter; ModernGL ignores it |
 | `ALFS_RAYCASTER` | `embree` | Ray caster: `embree` or `warp` |
 | `HF_TOKEN` | - | HuggingFace token for the gated DINOv3 weights |
 | `INPUT_DIR` | - | Path to input dataset folder |

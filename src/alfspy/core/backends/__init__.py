@@ -15,6 +15,7 @@ only the engine argument changes what you get.
 
 from .registry import (
     DEFAULT_ENGINE,
+    DEVICE_ENV_VAR,
     ENGINE_ENV_VAR,
     available_engines,
     backend_for_context,
@@ -22,11 +23,13 @@ from .registry import (
     engine_names,
     make_context,
     get_backend,
+    resolve_device,
     resolve_engine,
 )
 
 __all__ = [
     'DEFAULT_ENGINE',
+    'DEVICE_ENV_VAR',
     'ENGINE_ENV_VAR',
     'available_engines',
     'backend_for_context',
@@ -34,5 +37,6 @@ __all__ = [
     'engine_names',
     'make_context',
     'get_backend',
+    'resolve_device',
     'resolve_engine',
 ]

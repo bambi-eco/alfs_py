@@ -37,6 +37,7 @@ from alfspy.core.backends import (
     create_context,
     engine_names,
     make_context,
+    resolve_device,
     resolve_engine,
 )
 from alfspy.core.raycast import available_raycasters, create_raycaster
@@ -61,6 +62,7 @@ __all__ = [
     'available_engines',
     'engine_names',
     'resolve_engine',
+    'resolve_device',
     'backend_for_context',
     # ray casting
     'create_raycaster',
