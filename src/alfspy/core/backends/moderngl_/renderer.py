@@ -10,7 +10,13 @@ from numpy.typing import NDArray
 
 from alfspy.core.geo import AABB
 from alfspy.core.rendering.camera import Camera
-from alfspy.core.rendering.data import MeshData, RenderResultMode, Resolution, TextureData
+from alfspy.core.rendering.data import (
+    IntegralResult,
+    MeshData,
+    RenderResultMode,
+    Resolution,
+    TextureData,
+)
 from alfspy.core.util.basic import gen_checkerboard_tex
 from alfspy.core.util.defs import TRANSPARENT, BLACK, MAGENTA, PATH_SEP
 from alfspy.core.util.geo import get_aabb
@@ -58,7 +64,18 @@ class Renderer:
         self._released = False
         self._resolution = resolution
         self._ctx = ctx
-        self._fbo = self._ctx.simple_framebuffer(resolution.as_tuple(), components=4, dtype='f4')
+
+        # Two colour attachments: the samples, and the coverage count. Coverage used to be
+        # the accumulated alpha of attachment 0, which conflated "how opaque" with "how many
+        # shots" and cost a usable channel. It is its own single-component target now.
+        size = resolution.as_tuple()
+        self._color_tex = ctx.texture(size, 4, dtype='f4')
+        self._coverage_tex = ctx.texture(size, 1, dtype='f4')
+        self._depth_buf = ctx.depth_renderbuffer(size)
+        self._fbo = ctx.framebuffer(
+            color_attachments=[self._color_tex, self._coverage_tex],
+            depth_attachment=self._depth_buf,
+        )
         self._fbo.use()
 
         if texture is None:
@@ -260,6 +277,56 @@ class Renderer:
 
             return results
 
+    def _read_integral(self) -> IntegralResult:
+        """
+        Reads both colour attachments back as an :class:`IntegralResult`.
+
+        :return: The accumulated samples and the per-pixel coverage count, unnormalised and
+            still in OpenGL's bottom-up row order.
+        """
+        height, width = self._fbo.size[1], self._fbo.size[0]
+
+        accum = np.frombuffer(
+            self._fbo.read(components=4, dtype='f4', clamp=False, attachment=0),
+            dtype=np.float32).reshape((height, width, 4)).copy()
+        coverage = np.frombuffer(
+            self._fbo.read(components=1, dtype='f4', clamp=False, attachment=1),
+            dtype=np.float32).reshape((height, width)).copy()
+
+        return IntegralResult(accum=accum, coverage=coverage)
+
+    def render_integral_raw(self, shots: Union[CtxShot, Iterable[CtxShot]],
+                            release_shots: bool = False,
+                            mask: Optional[TextureData] = None) -> IntegralResult:
+        """
+        Integrates shots and returns the raw accumulation, without normalising or quantising.
+
+        This is what multi-channel rendering builds on: the caller gets the summed samples and
+        the coverage count separately, and decides how to combine them.
+
+        :param shots: The shots to be projected and integrated.
+        :param release_shots: Whether shots should be released after projection.
+        :param mask: The mask to be applied to each shot texture (optional).
+        :return: The accumulated samples and per-pixel coverage, in image row order.
+        """
+        if not isinstance(shots, Iterable):
+            shots = [shots]
+
+        self._use_mask(mask)
+        self._ctx.enable(cast(int, mgl.BLEND))
+        self._ctx.disable(cast(int, mgl.DEPTH_TEST))
+        self._ctx.blend_func = mgl.ADDITIVE_BLENDING
+
+        self._fbo.clear(color=TRANSPARENT)
+        for shot in shots:
+            self._project_shot(shot)
+            if release_shots:
+                shot.release()
+
+        integral = self._read_integral()
+        self._ctx.disable(cast(int, mgl.BLEND))
+        return IntegralResult(accum=integral.accum[::-1], coverage=integral.coverage[::-1])
+
     def render_integral(self, shots: Union[CtxShot, Iterable[CtxShot]], release_shots: bool = False,
                         mask: Optional[TextureData] = None, save: bool = False,
                         save_name: Optional[Iterator[str]] = None, auto_contrast: bool = True, alpha_threshold: float = 0.1 ) -> Optional[NDArray]:
@@ -290,30 +357,26 @@ class Renderer:
             if release_shots:
                 shot.release()
 
-        integral_bytes = self._fbo.read(components=4, dtype='f4', clamp=False)
-        integral_arr = np.frombuffer(integral_bytes, dtype=np.single).reshape((*self._fbo.size[1::-1], 4))
-        alpha = integral_arr[:, :, -1][:, :, np.newaxis]
-        alpha_mask = (alpha > alpha_threshold) # Note: alpha contains full numbers (e.g. 3 if 3 shots are overlapping)
-
-        # `out=` is essential. numpy's `where=` does not initialise the excluded entries, so
-        # without an explicit output array every below-threshold pixel holds whatever was in
-        # the freshly allocated buffer -- uninitialised heap memory. It then goes through
-        # `* 255` and `.astype(np.uint8)`, producing values that change between runs and
-        # overflow or turn into NaN. This is a host-side source of the intermittent artifacts
-        # reported for the Xvfb deployment, and it is independent of OpenGL: it was usually
-        # masked on-premise because `add_background=True` paints over the uncovered region.
-        out = np.divide(integral_arr, alpha, where=alpha_mask,
-                        out=np.zeros_like(integral_arr, dtype=np.single))
-        if auto_contrast and alpha_mask.any():
-            mask_rgba = np.broadcast_to(alpha_mask, out.shape).copy()
-            mask_rgba[:,:,-1] = False # set alpha to 0
-            min_val = np.min(out[mask_rgba])
-            max_val = np.max(out[mask_rgba])
-            if max_val > min_val:  # a uniform region would divide by zero
-                out[mask_rgba] = (out[mask_rgba] - min_val) / (max_val - min_val)
-        result = (out * 255).astype(np.uint8)[::-1, ...]
-
+        integral = self._read_integral()
         self._ctx.disable(cast(int, mgl.BLEND))
+
+        covered = integral.coverage > alpha_threshold
+        out = integral.normalised(threshold=alpha_threshold)
+
+        if auto_contrast and covered.any():
+            # Stretch the samples only. The alpha channel is a constant 1 wherever a pixel is
+            # covered, so including it would peg the range at [0, 1] and undo the stretch.
+            samples = out[..., :3][covered]
+            min_val, max_val = samples.min(), samples.max()
+            if max_val > min_val:  # a uniform region would divide by zero
+                stretched = (out[..., :3] - min_val) / (max_val - min_val)
+                out[..., :3] = np.where(covered[..., np.newaxis], stretched, out[..., :3])
+
+        # Alpha in the *returned image* means opacity, as a PNG reader expects: opaque where
+        # any shot contributed, transparent elsewhere. It is no longer the overlap count --
+        # that is `integral.coverage`.
+        out[..., 3] = covered.astype(np.float32)
+        result = (out * 255).astype(np.uint8)[::-1, ...]
 
         if save:
             if save_name is None:
@@ -365,12 +428,16 @@ class Renderer:
     #version 330
 
     uniform sampler2D {_PAR_TEX};
-    
+
     in vec2 v_out_v2_uv;
-    out vec4 f_out_v4_color;
-    
+    layout (location = 0) out vec4 f_out_v4_color;
+    layout (location = 1) out float f_out_f_coverage;
+
     void main() {{
         f_out_v4_color = texture(u_s2_tex, v_out_v2_uv);
+        // The framebuffer has two attachments, so every fragment shader must write both --
+        // an unwritten attachment holds undefined values.
+        f_out_f_coverage = 1.0;
     }}
     """
 
@@ -405,20 +472,24 @@ class Renderer:
     uniform float {_PAR_MASK_FLAG};
 
     in vec4 v_out_v4_shot_uv;
-    out vec4 f_out_v4_color;
+    layout (location = 0) out vec4 f_out_v4_color;
+    layout (location = 1) out float f_out_f_coverage;
 
     void main() {{
         vec4 uv = v_out_v4_shot_uv;
         uv = vec4(uv.xyz / uv.w / 2.0 + .5, 1.0); // perspective division and conversion to [0,1] from NDC
-        
+
         if(uv.w <= 0.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {{ // uv out of bounds
-            discard; // throw away the fragment 
-            f_out_v4_color = vec4(0.0, 0.0, 0.0, 0.0);
+            discard; // throw away the fragment
         }} else {{
-            f_out_v4_color = vec4(texture({_PAR_TEX}, uv.xy).rgba);
+            float weight = 1.0;
             if ({_PAR_MASK_FLAG} > 0.0) {{
-                f_out_v4_color.rgba *= texture({_PAR_MASK}, uv.xy).r;
+                weight = texture({_PAR_MASK}, uv.xy).r;
             }}
+            f_out_v4_color = texture({_PAR_TEX}, uv.xy).rgba * weight;
+            // Coverage carries the same weight as the samples, so a masked-out fragment
+            // contributes to neither and the average stays consistent.
+            f_out_f_coverage = weight;
         }}
     }}
     """

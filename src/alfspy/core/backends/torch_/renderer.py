@@ -20,7 +20,13 @@ from numpy.typing import NDArray
 
 from alfspy.core.geo import AABB
 from alfspy.core.rendering.camera import Camera
-from alfspy.core.rendering.data import MeshData, RenderResultMode, Resolution, TextureData
+from alfspy.core.rendering.data import (
+    IntegralResult,
+    MeshData,
+    RenderResultMode,
+    Resolution,
+    TextureData,
+)
 
 from .data import RenderObject
 from .shot import CtxShot
@@ -98,6 +104,11 @@ class Renderer:
         self._resolution = resolution
         self._ctx = ctx
         self._fbo = ctx.simple_framebuffer(resolution.as_tuple(), components=4)
+        # Coverage lives in its own accumulator rather than in the alpha channel. The
+        # ModernGL backend uses a second colour attachment for the same reason: alpha as an
+        # overlap counter costs a channel that an N-channel field needs for data.
+        self._coverage = torch.zeros(
+            (resolution.height, resolution.width), device=ctx.device, dtype=ctx.dtype)
 
         if texture is None:
             texture = TextureData(gen_checkerboard_tex(10, 50, BLACK, MAGENTA, dtype='f4'))
@@ -332,12 +343,18 @@ class Renderer:
         clip = self._shot_clip(shot, self._fragment_world(fragments))
         texture = shot.get_texture(self._ctx)
 
-        colour, keep = shade_shot_projected(clip, texture, self._mask_tex,
-                                            reject_behind_camera=self._ctx.reject_behind_camera)
+        colour, keep, weight = shade_shot_projected(
+            clip, texture, self._mask_tex,
+            reject_behind_camera=self._ctx.reject_behind_camera, return_weight=True)
         if colour.numel() == 0:
             return
 
-        self._write(fragments.pixel_index.index_select(0, keep), colour, additive=additive)
+        pixel_index = fragments.pixel_index.index_select(0, keep)
+        self._write(pixel_index, colour, additive=additive)
+
+        if additive:
+            self._coverage.view(-1).index_add_(
+                0, pixel_index, weight.squeeze(-1).to(self._coverage.dtype))
 
     def _psi_complete_view(self, shots: Iterable[CtxShot], release_shots: bool) -> Iterator[NDArray]:
         background = self.render_background()
@@ -448,6 +465,40 @@ class Renderer:
 
             return results
 
+    def render_integral_raw(self, shots: Union[CtxShot, Iterable[CtxShot]],
+                            release_shots: bool = False,
+                            mask: Optional[TextureData] = None) -> IntegralResult:
+        """
+        Integrates shots and returns the raw accumulation, without normalising or quantising.
+
+        :param shots: The shots to be projected and integrated.
+        :param release_shots: Whether shots should be released after projection.
+        :param mask: The mask to be applied to each shot texture (optional).
+        :return: The accumulated samples and per-pixel coverage, in image row order.
+        """
+        if not isinstance(shots, Iterable):
+            shots = [shots]
+
+        self._use_mask(mask)
+        self._ctx.enable(BLEND)
+        self._ctx.disable(DEPTH_TEST)
+        self._ctx.blend_func = ADDITIVE_BLENDING
+        depth_test = self._ctx.depth_test_in_integral
+
+        self._fbo.clear(TRANSPARENT)
+        self._coverage.zero_()
+        for shot in shots:
+            self._project_shot(shot, additive=True, depth_test=depth_test)
+            if release_shots:
+                shot.release()
+
+        accum = self._fbo.read_array(dtype='f4', clamp=False)
+        coverage = self._coverage.detach().cpu().numpy().astype(np.float32)
+
+        self._ctx.disable(BLEND)
+        self._ctx.enable(DEPTH_TEST)
+        return IntegralResult(accum=accum[::-1], coverage=coverage[::-1])
+
     def render_integral(self, shots: Union[CtxShot, Iterable[CtxShot]], release_shots: bool = False,
                         mask: Optional[TextureData] = None, save: bool = False,
                         save_name: Optional[str] = None, auto_contrast: bool = True,
@@ -481,35 +532,36 @@ class Renderer:
         depth_test = self._ctx.depth_test_in_integral
 
         self._fbo.clear(TRANSPARENT)
+        self._coverage.zero_()
         for shot in shots:
             self._project_shot(shot, additive=True, depth_test=depth_test)
             if release_shots:
                 shot.release()
 
-        integral_arr = self._fbo.read_array(dtype='f4', clamp=False)
-        alpha = integral_arr[:, :, -1][:, :, np.newaxis]
-        alpha_mask = (alpha > alpha_threshold)  # alpha counts overlaps, e.g. 3 for 3 shots
-
-        # `out=` is essential. numpy's `where=` does not initialise the excluded entries, so
-        # without an explicit output array every below-threshold pixel holds whatever was in
-        # the freshly allocated buffer -- uninitialised heap memory. It then goes through
-        # `* 255` and `.astype(np.uint8)`, producing values that change between runs and
-        # overflow or turn into NaN. Upstream omitted `out=`, which is a second and entirely
-        # host-side source of the "sometimes, not always" artifacts the Xvfb deployment saw;
-        # it was usually masked by `add_background=True` painting over the uncovered region.
-        out = np.divide(integral_arr, alpha, where=alpha_mask,
-                        out=np.zeros_like(integral_arr, dtype=np.float32))
-        if auto_contrast and alpha_mask.any():
-            mask_rgba = np.broadcast_to(alpha_mask, out.shape).copy()
-            mask_rgba[:, :, -1] = False  # set alpha to 0
-            min_val = np.min(out[mask_rgba])
-            max_val = np.max(out[mask_rgba])
-            if max_val > min_val:
-                out[mask_rgba] = (out[mask_rgba] - min_val) / (max_val - min_val)
-        result = (out * 255).astype(np.uint8)[::-1, ...]
+        integral = IntegralResult(
+            accum=self._fbo.read_array(dtype='f4', clamp=False),
+            coverage=self._coverage.detach().cpu().numpy().astype(np.float32),
+        )
 
         self._ctx.disable(BLEND)
         self._ctx.enable(DEPTH_TEST)
+
+        covered = integral.coverage > alpha_threshold
+        out = integral.normalised(threshold=alpha_threshold)
+
+        if auto_contrast and covered.any():
+            # Stretch the samples only. The alpha channel is a constant 1 wherever a pixel is
+            # covered, so including it would peg the range at [0, 1] and undo the stretch.
+            samples = out[..., :3][covered]
+            min_val, max_val = samples.min(), samples.max()
+            if max_val > min_val:
+                stretched = (out[..., :3] - min_val) / (max_val - min_val)
+                out[..., :3] = np.where(covered[..., np.newaxis], stretched, out[..., :3])
+
+        # Alpha in the returned image means opacity, as a PNG reader expects; the overlap
+        # count is `integral.coverage`.
+        out[..., 3] = covered.astype(np.float32)
+        result = (out * 255).astype(np.uint8)[::-1, ...]
 
         if save:
             if save_name is None:

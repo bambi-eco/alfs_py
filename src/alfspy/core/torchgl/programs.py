@@ -120,7 +120,8 @@ def shade_shot(fragments: Fragments, shot_clip: torch.Tensor, indices: torch.Ten
 
 def shade_shot_projected(clip: torch.Tensor, texture: TorchTexture,
                          mask: Optional[TorchTexture] = None,
-                         reject_behind_camera: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+                         reject_behind_camera: bool = False,
+                         return_weight: bool = False):
     """
     The fragment half of the ``SHOT`` program, taking clip coordinates already in fragment space.
 
@@ -139,15 +140,22 @@ def shade_shot_projected(clip: torch.Tensor, texture: TorchTexture,
     :param texture: The source frame texture.
     :param mask: The projection mask (optional). Its red channel scales the colour.
     :param reject_behind_camera: Whether to reject fragments behind the shot camera.
-    :return: A tuple of ``(colours, keep)`` where ``colours`` is ``(M, 4)`` RGBA and ``keep``
-        is an ``(M,)`` index tensor selecting the surviving fragments.
+    :param return_weight: Whether to also return the per-fragment mask weight. The weight is
+        the coverage contribution of this shot -- ``1`` for an unmasked fragment, the mask's
+        red channel otherwise. It is already folded into ``colours``; returning it separately
+        is what lets the caller accumulate coverage without inferring it from an alpha
+        channel that an N-channel field needs for data.
+    :return: ``(colours, keep)``, or ``(colours, keep, weights)`` when ``return_weight``.
+        ``colours`` is ``(M, 4)`` RGBA and ``keep`` is an ``(M,)`` index tensor selecting the
+        surviving fragments.
     """
     device = clip.device
     dtype = clip.dtype
 
     if clip.shape[0] == 0:
-        return (torch.zeros((0, 4), device=device, dtype=dtype),
-                torch.zeros(0, device=device, dtype=torch.int64))
+        empty = (torch.zeros((0, 4), device=device, dtype=dtype),
+                 torch.zeros(0, device=device, dtype=torch.int64))
+        return empty + (torch.zeros((0, 1), device=device, dtype=dtype),) if return_weight else empty
 
     w = clip[:, 3]
     safe_w = torch.where(w.abs() < 1e-12, torch.ones_like(w), w)
@@ -163,7 +171,10 @@ def shade_shot_projected(clip: torch.Tensor, texture: TorchTexture,
     # advanced indexing, and the caller needs the same selection for its pixel indices.
     keep = torch.nonzero(inside, as_tuple=False).squeeze(1)
     if keep.numel() == 0:
-        return torch.zeros((0, 4), device=device, dtype=dtype), keep
+        empty = torch.zeros((0, 4), device=device, dtype=dtype)
+        if return_weight:
+            return empty, keep, torch.zeros((0, 1), device=device, dtype=dtype)
+        return empty, keep
 
     kept_uv = uv.index_select(0, keep)
     colour = _to_rgba(texture.sample(kept_uv[:, 0], kept_uv[:, 1]), dtype)
@@ -171,7 +182,11 @@ def shade_shot_projected(clip: torch.Tensor, texture: TorchTexture,
     if mask is not None:
         weight = mask.sample(kept_uv[:, 0], kept_uv[:, 1])[:, 0:1]
         colour = colour * weight
+    else:
+        weight = torch.ones((colour.shape[0], 1), device=device, dtype=dtype)
 
+    if return_weight:
+        return colour, keep, weight
     return colour, keep
 
 

@@ -141,6 +141,58 @@ class TextureData:
         self.texture = cv2.resize(self.texture, (int(n_height), int(n_width)))
 
 
+@dataclass
+class IntegralResult:
+    """
+    The raw output of an ALFS integral, before normalisation.
+
+    Coverage is kept separate from the accumulated samples rather than folded into an alpha
+    channel. Historically the renderer summed each shot's own alpha and divided by it, so
+    alpha did double duty as the overlap counter -- which is why ``alpha_threshold`` means
+    "minimum number of overlapping shots". That works only while every shot's alpha is
+    exactly 1, and it costs a channel: an N-channel field striped through an RGBA pipeline
+    has its fourth channel silently overwritten by the counter and then divided by itself.
+
+    :cvar accum: ``(H, W, C)`` float32 sum of every contributing sample, not normalised.
+    :cvar coverage: ``(H, W)`` float32 count of contributing shots per pixel, weighted by the
+        mask where one is applied.
+    """
+    accum: NDArray
+    coverage: NDArray
+
+    @property
+    def channels(self) -> int:
+        """
+        :return: How many channels the accumulated field carries.
+        """
+        return self.accum.shape[-1]
+
+    def normalised(self, threshold: float = 0.1, fill: float = 0.0) -> NDArray:
+        """
+        Divides the accumulated samples by the coverage.
+
+        :param threshold: Minimum coverage for a pixel to count as observed. Pixels below it
+            are set to ``fill``.
+        :param fill: The value uncovered pixels take.
+        :return: An ``(H, W, C)`` float32 array of averaged samples.
+        """
+        counts = self.coverage[..., np.newaxis]
+        covered = counts > threshold
+        # `out=` is essential: numpy's `where=` leaves the excluded entries at whatever the
+        # freshly allocated buffer happened to contain -- uninitialised heap memory, which
+        # then goes through `* 255` and `.astype(np.uint8)` and produces values that change
+        # between runs. This was a real source of intermittent artifacts.
+        out = np.full(self.accum.shape, fill, dtype=np.float32)
+        return np.divide(self.accum, counts, where=covered, out=out)
+
+    @property
+    def covered(self) -> NDArray:
+        """
+        :return: ``(H, W)`` boolean mask of pixels any shot contributed to.
+        """
+        return self.coverage > 0
+
+
 class RenderResultMode(Enum):
     """
     Enumeration of render result format and content codes.
