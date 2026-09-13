@@ -215,6 +215,16 @@ class CtxShot:
         """
         return self.camera.get_mat(dtype='f4') * self.get_correction()
 
+    def get_label_camera(self) -> Camera:
+        """
+        :return: A perspective camera whose view matrix is ``V @ C``, the world-to-camera transform
+        the shot program projects this frame with. Ray-casting a source pixel through it hits the
+        mesh exactly where the renderer textures that pixel, so labels un-projected through this
+        camera land on the image content. See :func:`alfspy.core.rendering.shot.label_camera_for`.
+        """
+        from alfspy.core.rendering.shot import label_camera_for
+        return label_camera_for(self.camera, self.correction)
+
     @staticmethod
     def _process_json(data: dict, ctx: Context, count: Optional[int] = None, image_dir: Optional[str] = None,
                       fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) \

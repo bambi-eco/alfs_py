@@ -15,6 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover
 import numpy as np
 
 from alfspy.core.rendering import Resolution, Camera, CtxShot, RenderResultMode, TextureData
+from alfspy.core.rendering.shot import label_camera_for
 from pyrr import Quaternion, Vector3
 from trimesh import Trimesh
 
@@ -157,17 +158,24 @@ def to_yolo_format(axis_aligned_bounding_box: List[np.ndarray], img_width: int, 
     return f"{x_center} {y_center} {width} {height}"
 
 def get_camera_for_frame(matched_poses, frame_idx, cor_rotation_eulers, cor_translation):
+    """
+    Camera used to ray-cast a frame's label pixels onto the mesh.
+
+    Built from the same pose, correction and matrices the frame's shot is projected with, so
+    labels land where the frame's pixels land (see ``label_camera_for``). The old hand-built
+    camera (``position + t``, ``-(eulers - cor)``) applied the correction differently from the
+    shot program and rotated the labels about the nadir by about twice the yaw correction.
+    """
     cur_frame_data = matched_poses['images'][frame_idx]
     fovy = cur_frame_data['fovy'][0]
 
-    position = Vector3(cur_frame_data['location'])
-    rotation_eulers = (Vector3(
-        [np.deg2rad(val % 360.0) for val in cur_frame_data['rotation']]) - cor_rotation_eulers) * -1
-
-    position += cor_translation
-    rotation = Quaternion.from_eulers(rotation_eulers)
-
-    return Camera(fovy=fovy, aspect_ratio=1.0, position=position, rotation=rotation)
+    # identical to the shot construction above
+    rotation = [val % 360.0 for val in cur_frame_data['rotation']]
+    rotation = quaternion_from_drone_pose(rotation) if len(rotation) == 3 else Quaternion(rotation)
+    shot_camera = Camera(fovy=fovy, aspect_ratio=1.0, position=Vector3(cur_frame_data['location']),
+                         rotation=rotation)
+    correction = Transform(cor_translation, Quaternion.from_eulers(cor_rotation_eulers))
+    return label_camera_for(shot_camera, correction)
 
 
 def project_label(label_coordinates, input_resolution, tri_mesh, camera, render_resolution, single_shot_camera):

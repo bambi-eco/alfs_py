@@ -264,3 +264,38 @@ def test_label_camera_reproduces_the_corrected_shot_view(tilted_flight, ctx):
             shot.release()
 
     np.testing.assert_allclose(actual, expected, atol=1e-4)
+
+
+@pytest.mark.parametrize('module', ['alfs', 'orthografic_projection', 'orthographic_projection'])
+def test_legacy_get_camera_for_frame_reproduces_the_corrected_shot_view(module):
+    """
+    The pipeline modules build their label camera with ``get_camera_for_frame`` rather than
+    through ``ProjectionScene``. It must reproduce ``V_shot @ C`` for the shot those modules
+    construct (``quaternion_from_drone_pose`` pose, ``Transform(t, from_eulers(cor))``
+    correction) -- with a tilted pose and a non-neutral correction, where the old
+    ``position + t`` / ``-(eulers - cor)`` construction was off by twice the yaw correction.
+    """
+    import importlib
+
+    from alfspy.core.geo.transform import Transform
+    from alfspy.core.rendering.shot import label_camera_for
+    from alfspy.core.util.pyrrs import quaternion_from_drone_pose
+
+    get_camera_for_frame = importlib.import_module(f'alfspy.{module}').get_camera_for_frame
+    poses = {'images': [{'location': [12.0, -30.0, 140.0], 'rotation': [6.0, -3.0, 213.0],
+                         'fovy': [48.9]}]}
+    cor_eulers = Vector3([0.01, -0.02, 0.157], dtype='f4')
+    cor_translation = Vector3([1.5, -0.5, 23.3], dtype='f4')
+
+    shot_camera = Camera(fovy=48.9, aspect_ratio=1.0, position=Vector3(poses['images'][0]['location']),
+                         rotation=quaternion_from_drone_pose(poses['images'][0]['rotation']))
+    correction = Transform(cor_translation, Quaternion.from_eulers(cor_eulers), None, dtype='f4')
+    expected = (np.asarray(shot_camera.get_view(), dtype=np.float64)
+                @ np.asarray(correction.trans_mat.inverse * correction.rot_mat, dtype=np.float64))
+
+    actual = np.asarray(get_camera_for_frame(poses, 0, cor_eulers, cor_translation).get_view(),
+                        dtype=np.float64)
+    np.testing.assert_allclose(actual, expected, atol=1e-4)
+    # and the shot itself agrees with the free function
+    direct = np.asarray(label_camera_for(shot_camera, correction).get_view(), dtype=np.float64)
+    np.testing.assert_allclose(direct, expected, atol=1e-4)

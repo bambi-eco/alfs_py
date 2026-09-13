@@ -14,14 +14,53 @@ through one name in the meantime.)
 from abc import ABCMeta
 from typing import Optional, Union
 
+import numpy as np
 from numpy.typing import NDArray
-from pyrr import Quaternion, Vector3
+from pyrr import Matrix44, Quaternion, Vector3
 
 from alfspy.core.backends.registry import backend_for_context
 from alfspy.core.geo import Transform
+from alfspy.core.rendering.camera import Camera
 from alfspy.core.util.image import to_rgba_f4
 
-__all__ = ['CtxShot']
+__all__ = ['CtxShot', 'label_camera_for']
+
+
+def label_camera_for(camera: Camera, correction: Optional[Transform]) -> Camera:
+    """
+    Builds the camera that un-projects a shot's pixels the way the shot program projects them.
+
+    The shot program maps a world point with ``P * C * V`` (``p @ V @ C @ P`` in pyrr's row-vector
+    convention), where ``C = T(t)^-1 @ R(cor)`` applies the pose correction *in camera space*,
+    after the view transform. A camera whose view matrix equals ``V @ C`` therefore ray-casts a
+    pixel onto the mesh exactly where the renderer textures it. This is what
+    :class:`~alfspy.render.projection.ProjectionScene` does; the legacy pipelines
+    (``get_camera_for_frame`` in ``alfs.py`` and the two ``ortho*_projection.py`` modules) now go
+    through the same construction.
+
+    Those functions used to build the camera by hand as ``position + t`` and ``-(eulers - cor)``:
+    the translation in world space and the rotation with the opposite sign. With a non-zero yaw
+    correction that rotates every label about the nadir point by roughly twice the correction,
+    and with yaw corrections of a few degrees the labels ended up 10-25 px beside the animals at
+    1024 px. Zero corrections hid it.
+
+    :param camera: The shot's uncorrected camera (``CtxShot.camera``).
+    :param correction: The shot's correction transform (``CtxShot.correction``), or ``None``.
+    :return: A camera with the same fovy and aspect ratio whose ``get_view()`` equals ``V @ C``.
+    """
+    if correction is None:
+        correction = Transform(dtype='f4')
+    else:
+        correction = Transform(correction.position, correction.rotation, correction.scale, dtype='f4')
+    correction_matrix = correction.trans_mat.inverse * correction.rot_mat
+    view = (np.asarray(camera.get_view(dtype='f4'), dtype=np.float64)
+            @ np.asarray(correction_matrix, dtype=np.float64))
+    to_world = np.linalg.inv(view)
+    rotation = np.eye(4)
+    rotation[:3, :3] = to_world[:3, :3]
+    return Camera(fovy=camera.fovy, aspect_ratio=camera.aspect_ratio,
+                  position=Vector3(to_world[3, :3].astype('f4')),
+                  rotation=Quaternion.from_matrix(Matrix44(rotation.astype('f4'))))
 
 
 class CtxShot(metaclass=ABCMeta):
