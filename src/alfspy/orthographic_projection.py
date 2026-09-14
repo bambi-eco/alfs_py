@@ -385,19 +385,22 @@ def project_bbox_corners(
         return None
 
     # Project from world to output image coordinates
-    np_poses = world_to_pixel_coord(
+    # ``world_to_pixel_coord`` returns the x and y coordinates as two parallel sequences, not
+    # as one array of ``(x, y)`` pairs, so the extremes are taken per sequence.
+    pixel_xs, pixel_ys = world_to_pixel_coord(
         w_poses,
         render_resolution.width, render_resolution.height,
         single_shot_camera
     )
+    pixel_xs = np.atleast_1d(np.asarray(pixel_xs))
+    pixel_ys = np.atleast_1d(np.asarray(pixel_ys))
 
-    if len(np_poses) == 0:
+    if pixel_xs.size == 0 or pixel_ys.size == 0:
         return None
 
     # Get axis-aligned bounding box of projected points
-    coords = np.array(np_poses)
-    x_min, y_min = coords.min(axis=0)
-    x_max, y_max = coords.max(axis=0)
+    x_min, x_max = pixel_xs.min(), pixel_xs.max()
+    y_min, y_max = pixel_ys.min(), pixel_ys.max()
 
     # Clip to image bounds
     x_min = max(0, x_min)

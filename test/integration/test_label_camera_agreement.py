@@ -436,3 +436,47 @@ def test_old_hand_built_label_camera_misses_the_rendered_marker(ctx):
     assert miss > 5.0, (
         f'the old camera only missed by {miss:.1f} px; the scene is not discriminative'
     )
+
+
+def test_orthographic_project_bbox_corners_lands_on_the_rendered_marker(ctx):
+    """
+    ``orthographic_projection.project_bbox_corners`` end to end: the projected
+    ``(left, top, width, height)`` box must enclose the marker in the render.
+
+    It used to raise on every call: ``world_to_pixel_coord`` returns the x and y coordinates
+    as two parallel sequences, and the function took its extremes as if they were ``(x, y)``
+    pairs, so ``x_min, y_min = coords.min(axis=0)`` unpacked one value per corner.
+    """
+    import trimesh
+
+    from alfspy.orthographic_projection import get_camera_for_frame, project_bbox_corners
+
+    marker_px = (20, 44)
+    eulers_deg, cor_eulers, cor_translation = LEGACY_POSES[0]
+    poses, cor_eulers, cor_translation, correction, rotation, fovy = _legacy_pose(
+        eulers_deg, cor_eulers, cor_translation)
+
+    rendered, render_camera = _render_legacy_shot(ctx, correction, rotation, fovy,
+                                                  _marker_image(marker_px=marker_px))
+    marker_centre = _marker_centre(rendered)
+
+    mesh = flat_quad(half=DEM_HALF)
+    tri_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.indices)
+    camera = get_camera_for_frame(poses, 0, cor_eulers, cor_translation)
+    col, row = marker_px
+    box = project_bbox_corners((col - 1, row - 1, 3, 3), Resolution(FRAME, FRAME), tri_mesh,
+                               camera, Resolution(RENDER, RENDER), render_camera)
+
+    assert box is not None, 'the marker box did not project'
+    left, top, width, height = box
+    assert width > 0 and height > 0
+    # a 3 px block of a 64 px frame covering 60 m, drawn into 128 px covering 240 m: a few px
+    assert width < 12 and height < 12, f'the projected box is implausibly large: {box}'
+    assert left + width / 2.0 == pytest.approx(marker_centre[0], abs=1.5), (
+        f'projected box centre x={left + width / 2.0:.1f} but the marker rendered at '
+        f'x={marker_centre[0]:.1f}'
+    )
+    assert top + height / 2.0 == pytest.approx(marker_centre[1], abs=1.5), (
+        f'projected box centre y={top + height / 2.0:.1f} but the marker rendered at '
+        f'y={marker_centre[1]:.1f}'
+    )
