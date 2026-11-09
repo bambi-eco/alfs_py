@@ -27,9 +27,10 @@ class CameraPositioningMode(Enum):
 class BaseSettings:
     """
     Class storing basic settings used by rendering processes.
-    :cvar count: The max amount of shots to be used.
-    :cvar initial_skip: The number of shots read from the JSON file to be skipped from the beginning.
-    :cvar skip: The number of shots to be skipped after every shot projection.
+    :cvar count: The number of ``images`` entries of the JSON file to use, counted before duplicated frames are dropped.
+    :cvar initial_skip: The number of ``images`` entries of the JSON file to be skipped from the beginning.
+    :cvar skip: The step between two used ``images`` entries.
+    :cvar skip_duplicates: Whether entries flagged with ``"duplicated": true`` (frozen thermal frames) are left out.
     :cvar lazy: Whether the shots should be loaded lazy.
     :cvar add_background: Whether to overlay the result over a render of the background object.
     :cvar camera_dist: The distance between the background objects and the camera along the Z-axis.
@@ -48,6 +49,7 @@ class BaseSettings:
     count: int = 1
     initial_skip: int = 0
     skip: int = 1
+    skip_duplicates: bool = True
     lazy: bool = True
     add_background: bool = True
     camera_dist: float = 1.0
@@ -112,7 +114,8 @@ class ShutterAnimationSettings(BaseAnimationSettings):
     Class storing settings used by the shutter animation process.
     Extends upon ``BaseAnimationSettings`` parameters.
     :cvar shots_grow_func: Function yielding how many shots should be added after rendering the frame of the given number.
-    :cvar reference_index: The index of reference shot.
+    :cvar reference_index: The index of the reference shot within the loaded shots, i.e., after ``initial_skip``,
+        ``skip`` and dropping duplicated frames.
     :cvar grow_symmetrical: Whether the shots before the initial shot should be added in addition to the shots after.
     If ``True`` shots get added symmetrically around the initial shot.
     """

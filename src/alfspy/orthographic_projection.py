@@ -60,6 +60,7 @@ from trimesh import Trimesh
 from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coord
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.renderer import Renderer
+from alfspy.core.util.basic import frame_is_duplicated
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
@@ -260,9 +261,14 @@ def get_shots_for_files(
         matched_poses: dict,
         lazy: bool = False,
         fovy: float = 60.0,
-        central_frame_idx: Optional[int] = None
+        central_frame_idx: Optional[int] = None,
+        skip_duplicates: bool = True
 ) -> Tuple[List[CtxShot], List[str], List[Vector3], List[Transform], List[Vector3]]:
-    """Get shots for a list of image files."""
+    """Get shots for a list of image files.
+
+    Frames whose pose entry carries ``"duplicated": true`` (frozen thermal frames) are left out
+    when ``skip_duplicates`` is set.
+    """
     shots = []
     shot_names = []
     shots_rotation_eulers = []
@@ -276,8 +282,13 @@ def get_shots_for_files(
         # Extract frame index from filename: {flight_id}_{frame_idx}.jpg
         idx = int(img_file.split("_")[1].split(".")[0])
 
-        if idx not in matched_poses.get("images", {}):
+        images = matched_poses.get("images", [])
+        if not (0 <= idx < len(images)):
             logging.warning(f"Frame {idx} not found in poses file, skipping {img_file}")
+            continue
+
+        if skip_duplicates and frame_is_duplicated(matched_poses, idx):
+            logging.info(f"Frame {idx} is flagged as duplicated (frozen thermal frame), skipping {img_file}")
             continue
 
         camera_position = Vector3(matched_poses["images"][idx]["location"])
@@ -464,7 +475,8 @@ def process_flight(
 
     # Get all shots for this flight
     shots, shot_names, shots_rotation_eulers, corrections, correction_eulers = get_shots_for_files(
-        flight_data.image_files, images_folder, ctx, corrections_data, matched_poses
+        flight_data.image_files, images_folder, ctx, corrections_data, matched_poses,
+        skip_duplicates=config.skip_duplicates
     )
 
     if len(shots) == 0:
@@ -625,6 +637,7 @@ class ProjectionConfig:
     project_orthogonal: bool = False
     alpha_threshold: float = 2.0
     overwrite: bool = False
+    skip_duplicates: bool = True  # skip frames flagged "duplicated": true in the poses (frozen thermal frames)
     mask_suffix: str = ''  # e.g., '_t' for thermal, '_r' for RGB
 
 

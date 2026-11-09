@@ -46,6 +46,7 @@ Typical usage::
 
 import json
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
@@ -68,6 +69,7 @@ from alfspy.core.rendering import (
     TextureData,
 )
 from alfspy.core.rendering.renderer import Renderer
+from alfspy.core.util.basic import is_duplicated
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
@@ -93,6 +95,9 @@ class ProjectionSettings:
     :cvar add_background: Whether to overlay the result on a render of the background mesh.
     :cvar input_resolution: Resolution of the source frames. If ``None`` it is derived from the
         mask (when given) or from the first projected image.
+    :cvar skip_duplicates: Whether :meth:`ProjectionScene.render_lightfield` leaves out neighbour
+        frames flagged with ``"duplicated": true`` (frozen thermal frames, e.g. during shutter
+        calibration). Their labels are left out with them.
     """
     ortho_size: Tuple[float, float] = (70.0, 70.0)
     render_resolution: Resolution = field(default_factory=lambda: Resolution(2048, 2048))
@@ -100,6 +105,7 @@ class ProjectionSettings:
     aspect_ratio: float = 1.0
     add_background: bool = False
     input_resolution: Optional[Resolution] = None
+    skip_duplicates: bool = True
 
 
 @dataclass
@@ -333,6 +339,20 @@ class ProjectionScene:
             return Quaternion(rotation)
         raise ValueError(f"Invalid rotation format of length {len(rotation)}: {rotation}")
 
+    def is_duplicated(self, frame_idx: int) -> bool:
+        """Whether the pose entry at ``frame_idx`` is flagged with ``"duplicated": true``.
+
+        Such a frame (kept by bambi_detection's ``flag_duplicates``) has a valid pose, but its
+        image is a frozen copy of the previous frame. ``self.images`` always keeps these entries,
+        so frame indices stay aligned with the video.
+        """
+        return is_duplicated(self.images[frame_idx])
+
+    def _warn_if_duplicated(self, frame_idx: int) -> None:
+        if self.is_duplicated(frame_idx):
+            warnings.warn(f"Frame {frame_idx} is flagged as duplicated (frozen thermal frame); "
+                          "its image does not show its pose.", stacklevel=3)
+
     def _make_shot(self, image_path: str, frame_idx: int) -> CtxShot:
         """Create a :class:`CtxShot` for ``image_path`` from the pose at ``frame_idx``."""
         meta = self.images[frame_idx]
@@ -433,6 +453,7 @@ class ProjectionScene:
         self._ensure_active()
         if frame_idx is None:
             frame_idx = frame_index_from_path(image_path)
+        self._warn_if_duplicated(frame_idx)
 
         settings = self._build_settings()
         shot = self._make_shot(image_path, frame_idx)
@@ -491,6 +512,7 @@ class ProjectionScene:
 
         :param central_image: Path to the central frame image.
         :param neighbor_images: Paths to the neighbouring frame images (before and after).
+            Neighbours flagged as duplicated are left out when ``settings.skip_duplicates`` is set.
         :param central_idx: Pose index of the central frame. Parsed from the file name if ``None``.
         :param neighbor_indices: Pose indices of the neighbours. Parsed from file names if ``None``.
         :param labels: Optional mapping ``frame_idx -> labels`` for all contributing frames.
@@ -507,10 +529,16 @@ class ProjectionScene:
             neighbor_indices = [frame_index_from_path(p) for p in neighbor_images]
         if len(neighbor_indices) != len(neighbor_images):
             raise ValueError("neighbor_indices must match neighbor_images in length")
+        self._warn_if_duplicated(central_idx)
+
+        neighbors = list(zip(neighbor_images, neighbor_indices))
+        if self.settings.skip_duplicates:
+            neighbors = [(p, idx) for p, idx in neighbors if not self.is_duplicated(idx)]
+        neighbor_indices = [idx for _, idx in neighbors]
 
         settings = self._build_settings()
         central_shot = self._make_shot(central_image, central_idx)
-        neighbor_shots = [self._make_shot(p, idx) for p, idx in zip(neighbor_images, neighbor_indices)]
+        neighbor_shots = [self._make_shot(p, idx) for p, idx in neighbors]
         renderer = None
         try:
             single_shot_camera = make_camera(
@@ -523,8 +551,10 @@ class ProjectionScene:
 
             if output_image:
                 _ensure_parent(output_image)
-                all_shots = neighbor_shots[: len(neighbor_shots) // 2] + [central_shot] \
-                    + neighbor_shots[len(neighbor_shots) // 2:]
+                # Split by frame index, not list halves: dropped duplicates can unbalance them.
+                before = [shot for shot, idx in zip(neighbor_shots, neighbor_indices) if idx < central_idx]
+                after = [shot for shot, idx in zip(neighbor_shots, neighbor_indices) if idx >= central_idx]
+                all_shots = before + [central_shot] + after
                 renderer.render_integral(
                     make_shot_loader(all_shots),
                     mask=self.mask_texture,

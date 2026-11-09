@@ -23,6 +23,7 @@ from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coo
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.renderer import Renderer
 from alfspy.core.util.collections.cyclic import CyclicList
+from alfspy.core.util.basic import frame_is_duplicated
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.loggings import LoggerStep
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
@@ -315,6 +316,8 @@ def project_images_for_flight(flight_key: int, split: str, images_folder: str, l
                     if splits[0] != str(flight_key):
                         continue
                     neighbour_id = int(Path(splits[1]).stem)
+                    if frame_is_duplicated(matched_poses, neighbour_id):
+                        continue  # frozen thermal frame
                     if frame_idx > neighbour_id >= frame_idx - nr_of_frames_before_current and (frame_idx - neighbour_id) % neighbor_fps == 0:
                         previous_frames.append(neighbour_frame)
                         previous_frame_ids.append(neighbour_id)

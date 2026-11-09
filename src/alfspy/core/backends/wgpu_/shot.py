@@ -10,11 +10,9 @@ from pyrr import Vector3, Quaternion, Matrix44
 from alfspy.core.geo import Transform
 from alfspy.core.rendering.camera import Camera
 from alfspy.core.rendering.data import TextureData
+from alfspy.core.rendering.shot_json import shot_params_from_json
 from .context import WgpuContext
-from alfspy.core.util.basic import get_first_valid
-from alfspy.core.util.defs import PATH_SEP
 from alfspy.core.util.image import to_rgba_f4
-from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 
 
 class CtxShot:
@@ -295,56 +293,28 @@ class CtxShot:
 
     @staticmethod
     def _process_json(data: dict, ctx: WgpuContext, count: Optional[int] = None, image_dir: Optional[str] = None,
-                      fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) \
+                      fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False,
+                      initial_skip: int = 0, skip: int = 1, skip_duplicates: bool = True) \
             -> list[tuple[WgpuContext, str, Vector3, Quaternion, float, float, Transform, bool]]:
-        shot_params = []
-
-        if count is not None:
-            images_dat = data.get('images', [])
-            act_count = min(len(images_dat), count)
-            images = images_dat[0:act_count]
-        else:
-            images = data.get('images', [])
-
-        for image in images:
-            img_file = get_first_valid(image, ['imagefile', 'file', 'image'])
-            position = get_first_valid(image, ['location', 'pos', 'loc'])
-            rotation = get_first_valid(image, ['rotation', 'rot', 'quaternion'])
-            fov = get_first_valid(image, ['fovy', 'fov', 'fieldofview'])
-
-            if img_file is None or position is None or rotation is None:
-                raise ValueError('The given JSON file does not contain valid data')
-
-            rot_len = len(rotation)
-            if rot_len == 3:
-                rotation = quaternion_from_drone_pose(rotation)
-            elif rot_len == 4:
-                rotation = Quaternion(rotation)
-            else:
-                raise ValueError(f'Invalid rotation format of length {rot_len}: {rotation}')
-
-            if fov is None:
-                fov = fovy
-            elif isinstance(fov, list):
-                fov = fov[0]
-
-            img_file = f'{image_dir}{PATH_SEP}{img_file}'
-
-            shot_params.append((ctx, img_file, Vector3(position), rotation, fov, 1, correction, lazy))
-        return shot_params
+        return shot_params_from_json(data, ctx, count, image_dir, fovy, correction, lazy,
+                                     initial_skip=initial_skip, skip=skip, skip_duplicates=skip_duplicates)
 
     @staticmethod
     def from_json(file: str, ctx: WgpuContext, count: Optional[int] = None, image_dir: Optional[str] = None,
-                  fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False) -> list['CtxShot']:
+                  fovy: float = 60.0, correction: Optional[Transform] = None, lazy: bool = False,
+                  initial_skip: int = 0, skip: int = 1, skip_duplicates: bool = True) -> list['CtxShot']:
         """
         Creates context shots from a JSON file.
         :param file: The path of the JSON file to process.
         :param ctx: The context to attach the context shots to.
-        :param count: The maximum amount of shots to be created (optional).
+        :param count: The number of ``images`` entries to read, counted before duplicated frames are dropped (optional).
         :param image_dir: The directory of the images referenced in the JSON file (defaults to the JSON files directory).
         :param fovy: The default fovy value to be used when a JSON entry does not provide one.
         :param correction: The general correction to be applied to all shots (optional).
         :param lazy: Whether the created shots should be lazy loaded (defaults to ``False``).
+        :param initial_skip: The number of ``images`` entries to skip at the beginning.
+        :param skip: The step between two selected ``images`` entries.
+        :param skip_duplicates: Whether entries flagged with ``"duplicated": true`` are left out (defaults to ``True``).
         :return: A list of ``CtxShot`` objects.
         """
         if image_dir is None:
@@ -356,6 +326,7 @@ class CtxShot:
         with open(file, 'r') as f:
             data = json.load(f)
 
-        shot_params = CtxShot._process_json(data, ctx, count, image_dir, fovy, correction, lazy)
+        shot_params = CtxShot._process_json(data, ctx, count, image_dir, fovy, correction, lazy,
+                                            initial_skip=initial_skip, skip=skip, skip_duplicates=skip_duplicates)
 
         return [CtxShot(*shot_param) for shot_param in shot_params]

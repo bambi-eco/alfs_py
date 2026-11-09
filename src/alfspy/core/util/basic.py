@@ -21,6 +21,39 @@ def get_first_valid(in_dict: dict[Any], keys: Iterable[Any], default: Optional[A
     return default
 
 
+def is_duplicated(image: dict) -> bool:
+    """
+    Tells whether a shot JSON ``images`` entry is flagged as a duplicated frame.
+
+    bambi_detection's ``TimedPoseExtractor.extract(flag_duplicates=True)`` keeps frozen thermal
+    frames (e.g. while the shutter is closed for calibration) and marks them with
+    ``"duplicated": true``. Their pose is valid, but their image is a copy of the previous frame.
+    :param image: One entry of the ``images`` list.
+    :return: ``True`` if the entry carries a truthy ``duplicated`` key; otherwise ``False``.
+    """
+    return bool(image.get('duplicated', False))
+
+
+def frame_is_duplicated(poses: dict, frame_idx: int) -> bool:
+    """
+    Tells whether the frame at ``frame_idx`` of a loaded shot JSON file is flagged as duplicated.
+
+    Accepts the usual list form of ``images`` and the dict form keyed by the frame index as a
+    string. A frame that is not in the file counts as not duplicated.
+    :param poses: The loaded JSON data.
+    :param frame_idx: The frame index, i.e., the position in the ``images`` list.
+    :return: ``True`` if the frame exists and carries ``"duplicated": true``; otherwise ``False``.
+    """
+    images = poses.get('images', [])
+    if isinstance(images, dict):
+        image = images.get(str(frame_idx), images.get(frame_idx))
+    elif 0 <= frame_idx < len(images):
+        image = images[frame_idx]
+    else:
+        image = None
+    return image is not None and is_duplicated(image)
+
+
 def compare_color(col_a: Union[NDArray, Iterable, int, float], col_b: Union[NDArray, Iterable, int, float]) -> bool:
     """
     Compares two color values.

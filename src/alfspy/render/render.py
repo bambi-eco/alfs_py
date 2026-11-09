@@ -225,8 +225,8 @@ def read_shots(json_file: str, ctx, se: BaseSettings) -> list[CtxShot]:
     :param se: The basic render settings to be used.
     :return: A list of context related shots.
     """
-    shots = CtxShot.from_json(json_file, ctx, count=se.count + se.initial_skip, correction=se.correction, lazy=se.lazy)
-    return shots[se.initial_skip::se.skip]
+    return CtxShot.from_json(json_file, ctx, count=se.count, correction=se.correction, lazy=se.lazy,
+                             initial_skip=se.initial_skip, skip=se.skip, skip_duplicates=se.skip_duplicates)
 
 
 def make_camera(mesh_aabb: AABB, shots: Sequence[CtxShot], se: BaseSettings, rotation: Optional[Quaternion] = None) -> Camera:

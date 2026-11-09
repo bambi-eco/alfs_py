@@ -21,6 +21,7 @@ from trimesh import Trimesh
 from alfspy.core.rendering import CtxShot, TextureData
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.renderer import Renderer
+from alfspy.core.util.basic import is_duplicated
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
@@ -64,12 +65,17 @@ def load_poses_by_frame_number(poses_file: str) -> dict:
 
     Filename pattern:  DJI_<timestamp>_<NNNN>_T.png
     The frame number is the third '_'-separated token (1-based).
+
+    Entries flagged ``"duplicated": true`` (frozen thermal frames) are left out, so a
+    duplicated frame number reads as missing.
     """
     with open(poses_file, "r") as f:
         data = json.load(f)
 
     poses = {}
     for entry in data["images"]:
+        if is_duplicated(entry):
+            continue
         stem = Path(entry["imagefile"]).stem          # e.g. DJI_20260301081902_0133_T
         tokens = stem.split("_")
         # tokens: ['DJI', '<timestamp>', '<NNNN>', '<suffix>']

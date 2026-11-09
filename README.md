@@ -521,6 +521,36 @@ dataset/
 └── export_test.json
 ```
 
+### Poses file
+
+`poses.json` / `{flight_id}_matched_poses.json` holds an `images` list with one entry per
+frame. The position in that list is the frame index used everywhere else (file names, MOT
+labels, corrections).
+
+```json
+{"images": [
+  {"imagefile": "0-0-0.jpg", "location": [x, y, z], "rotation": [tilt, roll, heading],
+   "fovy": [46.4], "duplicated": true}
+]}
+```
+
+`fovy` is optional; the render settings' `fovy` is used where it is missing. `duplicated` is
+optional too: bambi_detection's `TimedPoseExtractor.extract(flag_duplicates=True)` sets it on
+frozen thermal frames (shutter calibration), keeping them in the list so frame indices stay
+aligned with the video. Their pose is valid but their image is a copy of the previous frame,
+so alfspy leaves them out of renders:
+
+- `CtxShot.from_json` / `read_shots`: `skip_duplicates=True` (`BaseSettings.skip_duplicates`).
+  `count`, `initial_skip` and `skip` are taken on the full list first, so the chosen window
+  does not move.
+- `ProjectionScene`: `self.images` keeps every entry; `is_duplicated(frame_idx)` tells them
+  apart. `render_lightfield` drops duplicated neighbours and their labels
+  (`ProjectionSettings.skip_duplicates`), and a duplicated central frame raises a warning.
+- The dataset scripts `alfs.py` and `orthographic_projection.py` skip them through their
+  `skip_duplicates` config field; `alfs2.py` and `orthografic_projection.py` always skip them.
+
+Set `skip_duplicates=False` to keep them.
+
 ---
 
 ## Migrating from 2.x

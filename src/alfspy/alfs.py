@@ -42,6 +42,7 @@ from alfspy.core.convert.convert import pixel_to_world_coord, world_to_pixel_coo
 from alfspy.core.geo.transform import Transform
 from alfspy.core.rendering.renderer import Renderer
 from alfspy.core.util.collections.cyclic import CyclicList
+from alfspy.core.util.basic import frame_is_duplicated
 from alfspy.core.util.geo import get_aabb
 from alfspy.core.util.pyrrs import quaternion_from_drone_pose
 from alfspy.render.data import BaseSettings, CameraPositioningMode
@@ -76,6 +77,7 @@ class ALFSConfig:
     neighbor_range_before: int = 10  # Number of frames before current
     neighbor_range_after: int = 10   # Number of frames after current
     frame_stride: int = 1            # Use every n-th frame as neighbor
+    skip_duplicates: bool = True     # Leave out neighbors flagged "duplicated": true in the poses (frozen thermal frames)
 
     # Rendering settings
     input_width: int = 1024
@@ -537,7 +539,13 @@ def render_alfs_for_flight(
             additional_frames = []
             additional_frame_ids = []
 
+            if config.skip_duplicates and frame_is_duplicated(matched_poses, frame_idx):
+                logging.warning(f"Frame {frame_idx} is flagged as duplicated (frozen thermal frame)")
+
             for neighbor_idx, neighbor_file in all_neighbors.items():
+                if config.skip_duplicates and frame_is_duplicated(matched_poses, neighbor_idx):
+                    continue
+
                 # Previous frames (before current)
                 if frame_idx > neighbor_idx >= frame_idx - config.neighbor_range_before:
                     if (frame_idx - neighbor_idx) % config.frame_stride == 0:

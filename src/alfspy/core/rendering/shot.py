@@ -111,20 +111,28 @@ class CtxShot(metaclass=ABCMeta):
     @staticmethod
     def from_json(file: str, ctx, count: Optional[int] = None, image_dir: Optional[str] = None,
                   fovy: float = 60.0, correction: Optional[Transform] = None,
-                  lazy: bool = False) -> list:
+                  lazy: bool = False, initial_skip: int = 0, skip: int = 1,
+                  skip_duplicates: bool = True) -> list:
         """
         Creates shots from a JSON file, for the backend that owns ``ctx``.
 
         :param file: The path of the JSON file to process.
         :param ctx: The context to attach the shots to. This selects the backend.
-        :param count: The maximum amount of shots to be created (optional).
+        :param count: The number of ``images`` entries to read, counted before duplicated
+            frames are dropped (optional).
         :param image_dir: The directory of the images referenced in the JSON file (defaults to
             the JSON file's directory).
         :param fovy: The default fovy to use when a JSON entry does not provide one.
         :param correction: The general correction to be applied to all shots (optional).
         :param lazy: Whether the created shots should be lazy loaded (defaults to ``False``).
+        :param initial_skip: The number of ``images`` entries to skip at the beginning.
+        :param skip: The step between two selected ``images`` entries.
+        :param skip_duplicates: Whether entries flagged with ``"duplicated": true`` (frozen
+            thermal frames kept by bambi_detection's ``flag_duplicates``) are left out
+            (defaults to ``True``).
         :return: A list of backend-specific shots.
         """
         impl = backend_for_context(ctx).CtxShot
         CtxShot.register(impl)
-        return impl.from_json(file, ctx, count, image_dir, fovy, correction, lazy)
+        return impl.from_json(file, ctx, count, image_dir, fovy, correction, lazy,
+                              initial_skip=initial_skip, skip=skip, skip_duplicates=skip_duplicates)

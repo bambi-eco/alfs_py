@@ -174,7 +174,8 @@ def build_flight(root: str,
                  step: float = 4.0,
                  flight_id: str = '001',
                  objects: Optional[Sequence[tuple]] = None,
-                 seed: int = 7) -> SyntheticFlight:
+                 seed: int = 7,
+                 duplicated_frames: Sequence[int] = ()) -> SyntheticFlight:
     """
     Generates a complete flight on disk.
 
@@ -198,6 +199,9 @@ def build_flight(root: str,
     :param flight_id: Prefix used in generated file names.
     :param objects: Ground objects as ``(track_id, world_x, world_y)`` (optional).
     :param seed: Seed for the generated frame patterns.
+    :param duplicated_frames: Frame indices to write as duplicated frames, the way
+        bambi_detection's ``flag_duplicates`` does: the pose entry carries
+        ``"duplicated": true`` and the image is a copy of the previous frame.
     :return: A :class:`SyntheticFlight` describing what was written.
     """
     os.makedirs(root, exist_ok=True)
@@ -242,14 +246,19 @@ def build_flight(root: str,
 
     poses = {'images': []}
     frame_files = []
+    previous_frame = None
     for idx, (x, y, z) in enumerate(positions):
         name = f'{flight_id}_{idx:08d}.png'
-        poses['images'].append({
+        entry = {
             'imagefile': name,
             'location': [float(x), float(y), float(z)],
             'rotation': [0.0, 0.0, 0.0],
             'fovy': [float(fovy)],
-        })
+        }
+        duplicated = idx in duplicated_frames and previous_frame is not None
+        if duplicated:
+            entry['duplicated'] = True
+        poses['images'].append(entry)
 
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         # A per-frame identifiable background plus a fixed structural pattern, so a render
@@ -257,6 +266,9 @@ def build_flight(root: str,
         frame[..., 0] = int(30 + 40 * idx) % 256
         frame[height // 4:3 * height // 4, width // 4:3 * width // 4, 1] = 200
         frame[..., 2] = rng.integers(0, 40, size=(height, width), dtype=np.uint8)
+        if duplicated:
+            frame = previous_frame.copy()  # frozen: the camera repeats its last image
+        previous_frame = frame
 
         path = os.path.join(frames_dir, name)
         cv2.imwrite(path, frame)

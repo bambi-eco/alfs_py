@@ -361,3 +361,61 @@ def test_lightfield_render_is_deterministic(scene, flight, tmp_path):
         cv2.imread(str(paths[0]), cv2.IMREAD_UNCHANGED),
         cv2.imread(str(paths[1]), cv2.IMREAD_UNCHANGED),
     )
+
+
+# ──────────────────────────────── duplicated frames ─────────────────────────
+
+
+@pytest.fixture(scope='module')
+def flight_with_duplicate(tmp_path_factory):
+    """Frame 3 is a frozen copy of frame 2, flagged ``"duplicated": true`` in the poses."""
+    from test.helpers.dataset import build_flight
+    return build_flight(str(tmp_path_factory.mktemp('dup_flight')), frame_count=5,
+                        frame_size=(32, 32), dem_resolution=6, duplicated_frames=(3,))
+
+
+def _dup_scene(flight, **overrides):
+    settings = ProjectionSettings(
+        ortho_size=(60.0, 60.0), render_resolution=Resolution(32, 32), fovy=flight.fovy,
+        aspect_ratio=1.0, add_background=False, input_resolution=Resolution(*flight.frame_size),
+        **overrides,
+    )
+    return ProjectionScene(dem_file=flight.dem_file, poses_file=flight.poses_file,
+                           correction_file=flight.correction_file, mask_file=flight.mask_file,
+                           settings=settings, device='cpu')
+
+
+def _lightfield_with_labels_only_on(scene, flight, frame):
+    """Render frame 2 with neighbours 1 and 3, giving labels to ``frame`` only."""
+    labels = {frame: [Label(class_id=0, bbox=(12.0, 12.0, 6.0, 6.0), track_id=7)]}
+    return scene.render_lightfield(
+        central_image=flight.frame_files[2],
+        neighbor_images=[flight.frame_files[1], flight.frame_files[3]],
+        central_idx=2, neighbor_indices=[1, 3], labels=labels,
+    )
+
+
+def test_duplicated_frames_stay_in_the_pose_list(flight_with_duplicate):
+    with _dup_scene(flight_with_duplicate) as scene:
+        assert len(scene.images) == flight_with_duplicate.frame_count
+        assert [scene.is_duplicated(i) for i in range(5)] == [False, False, False, True, False]
+
+
+def test_lightfield_leaves_out_duplicated_neighbours(flight_with_duplicate):
+    with _dup_scene(flight_with_duplicate) as scene:
+        # frame 3 is frozen: it is not integrated, so its labels are not merged either
+        assert _lightfield_with_labels_only_on(scene, flight_with_duplicate, 3) == []
+        # a regular neighbour still contributes
+        assert [label.track_id for label in _lightfield_with_labels_only_on(scene, flight_with_duplicate, 1)] == [7]
+
+
+def test_lightfield_keeps_duplicated_neighbours_on_request(flight_with_duplicate):
+    with _dup_scene(flight_with_duplicate, skip_duplicates=False) as scene:
+        merged = _lightfield_with_labels_only_on(scene, flight_with_duplicate, 3)
+        assert [label.track_id for label in merged] == [7]
+
+
+def test_duplicated_central_frame_warns(flight_with_duplicate, tmp_path):
+    with _dup_scene(flight_with_duplicate) as scene:
+        with pytest.warns(UserWarning, match='duplicated'):
+            scene.project_orthographic(flight_with_duplicate.frame_files[3], frame_idx=3)
